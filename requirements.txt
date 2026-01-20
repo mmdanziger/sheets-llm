@@ -1,0 +1,43 @@
+# Google Sheets LLM Inference System - Dependencies
+# =================================================
+#
+# Install with: pip install -r requirements.txt
+#
+# Reference documentation for each package:
+# - gspread: https://docs.gspread.org/en/v6.1.4/
+# - google-auth: https://google-auth.readthedocs.io/
+# - openai: https://platform.openai.com/docs/libraries/python-library
+# - anthropic: https://docs.anthropic.com/en/api/client-sdks
+# - ollama: https://github.com/ollama/ollama-python
+# - transformers: https://huggingface.co/docs/transformers/
+# - torch: https://pytorch.org/docs/stable/
+
+# Google Sheets API
+# -----------------
+gspread>=6.1.0,<7.0.0          # Google Sheets Python API
+google-auth>=2.34.0,<3.0.0      # Google authentication
+google-auth-oauthlib>=1.2.0     # OAuth support (if needed)
+
+# LLM API Clients
+# ---------------
+openai>=1.54.0,<2.0.0           # OpenAI Python SDK (GPT-4o, etc.)
+anthropic>=0.39.0,<1.0.0        # Anthropic Python SDK (Claude 3.5, etc.)
+ollama>=0.3.0,<1.0.0            # Ollama Python client
+
+# HuggingFace (Optional - for local inference)
+# --------------------------------------------
+# Uncomment these for HuggingFace Transformers support:
+transformers>=4.46.0,<5.0.0     # HuggingFace Transformers
+torch>=2.4.0                     # PyTorch (CPU/CUDA/MPS)
+accelerate>=1.1.0                # Model loading acceleration
+sentencepiece>=0.2.0             # Tokenizer support
+
+# Configuration
+# -------------
+pyyaml>=6.0.0,<7.0.0            # YAML configuration parsing
+python-dotenv>=1.0.0,<2.0.0     # Environment variable loading
+
+# Utilities
+# ---------
+# These are standard library in Python 3.9+, listed for documentation:
+# typing, dataclasses, logging, signal, time, datetime, pathlib, re, abc
