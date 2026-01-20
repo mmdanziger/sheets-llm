@@ -121,18 +121,18 @@ models:
   # Requires Ollama running: `ollama serve`
 
   # Best multilingual open model (Hebrew/Arabic)
-  - name: qwen2.5-7b
-    backend: ollama
-    model_id: qwen2.5:7b
-    temperature: 0.7
-    max_tokens: 300
+  # - name: qwen2.5-7b
+  #   backend: ollama
+  #   model_id: qwen2.5:7b
+  #   temperature: 0.7
+  #   max_tokens: 300
 
-  # Alternative multilingual (purpose-built)
-  - name: aya-23-8b
-    backend: ollama
-    model_id: aya:8b
-    temperature: 0.7
-    max_tokens: 300
+  # # Alternative multilingual (purpose-built)
+  # - name: aya-23-8b
+  #   backend: ollama
+  #   model_id: aya:8b
+  #   temperature: 0.7
+  #   max_tokens: 300
 
   # - name: mistral
   #   backend: ollama
@@ -181,12 +181,12 @@ models:
   #   device: mps  # Small enough for CPU
 
   # The "Shoggoth" - unaligned base model for comparison
-  - name: qwen2.5-base-UNSAFE
-    backend: huggingface
-    model_id: Qwen/Qwen2.5-7B  # Base model, no safety tuning
-    temperature: 0.7
-    max_tokens: 300
-    device: mps  # or mps for your M1
+  # - name: qwen2.5-base-UNSAFE
+  #   backend: huggingface
+  #   model_id: Qwen/Qwen2.5-7B  # Base model, no safety tuning
+  #   temperature: 0.7
+  #   max_tokens: 300
+  #   device: mps  # or mps for your M1
 # API Keys
 # --------
 # Use environment variables for security. Set them before running:

@@ -324,26 +324,38 @@ class OllamaBackend(LLMBackend):
         client = self._get_client(base_url)
         
         try:
-            # List available models
-            models = client.list()
-            available = {m['name'] for m in models.get('models', [])}
+            # List available models - API returns list of Model objects
+            response = client.list()
+            
+            # Handle both old dict format and new list format
+            if isinstance(response, dict):
+                models_list = response.get('models', [])
+            else:
+                # New format: response is a ListResponse with .models attribute
+                models_list = getattr(response, 'models', []) or []
+            
+            # Extract model names - handle both dict and object formats
+            available = set()
+            for m in models_list:
+                if isinstance(m, dict):
+                    name = m.get('name', '')
+                else:
+                    name = getattr(m, 'model', '') or getattr(m, 'name', '')
+                if name:
+                    available.add(name)
             
             # Normalize model name (handle :latest suffix)
             model_base = model_id.split(':')[0]
             
             if model_id not in available and f"{model_base}:latest" not in available:
                 logger.info(f"Pulling Ollama model: {model_id} (this may take a while)")
-                
-                # Pull the model
                 client.pull(model_id)
-                
                 logger.info(f"Successfully pulled: {model_id}")
             
             self._pulled_models.add(model_id)
             
         except Exception as e:
-            # If list fails, try to pull anyway (might be connection issue)
-            logger.warning(f"Could not check Ollama models: {e}")
+            logger.debug(f"Could not list Ollama models: {e}, will attempt inference anyway")
     
     def infer(self, prompt: str, model_config: ModelConfig) -> InferenceResult:
         from ollama import ResponseError
