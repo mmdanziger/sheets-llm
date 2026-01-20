@@ -22,7 +22,7 @@
 # 4. Enable Google Sheets API: https://console.cloud.google.com/apis/library/sheets.googleapis.com
 # 5. Share your spreadsheet with the service account email (Editor access)
 google_sheets:
-  credentials_file: service_account.json
+  credentials_file: ${HOME}/.config/gspread/service_account.json
 
 
 # Model Definitions
@@ -55,18 +55,18 @@ models:
   #   - gpt-4-turbo      : Previous flagship, 128k context
   #   - gpt-3.5-turbo    : Fast and cheap, 16k context
 
-  - name: gpt-4o
-    backend: openai
-    model_id: gpt-4o
-    temperature: 0.7
-    max_tokens: 500
-    # system_prompt: "You are a helpful assistant."
+  # - name: gpt-4o
+  #   backend: openai
+  #   model_id: gpt-4o
+  #   temperature: 0.7
+  #   max_tokens: 500
+  #   # system_prompt: "You are a helpful assistant."
 
-  - name: gpt-4o-mini
-    backend: openai
-    model_id: gpt-4o-mini
-    temperature: 0.7
-    max_tokens: 500
+  # - name: gpt-4o-mini
+  #   backend: openai
+  #   model_id: gpt-4o-mini
+  #   temperature: 0.7
+  #   max_tokens: 500
 
   - name: gpt-3.5-turbo
     backend: openai
@@ -86,21 +86,21 @@ models:
   #   - claude-3-5-haiku-20241022     : Claude 3.5 Haiku, fastest
   #   - claude-3-opus-20240229        : Claude 3 Opus, most capable
 
-  - name: claude-sonnet-4
-    backend: anthropic
-    model_id: claude-sonnet-4-20250514
-    temperature: 0.7
-    max_tokens: 500
+  # - name: claude-sonnet-4
+  #   backend: anthropic
+  #   model_id: claude-sonnet-4-20250514
+  #   temperature: 0.7
+  #   max_tokens: 500
 
-  - name: claude-3-5-sonnet
-    backend: anthropic
-    model_id: claude-3-5-sonnet-20241022
-    temperature: 0.7
-    max_tokens: 500
+  # - name: claude-3-5-sonnet
+  #   backend: anthropic
+  #   model_id: claude-3-5-sonnet-20241022
+  #   temperature: 0.7
+  #   max_tokens: 500
 
-  - name: claude-3-5-haiku
+  - name: claude-3-haiku
     backend: anthropic
-    model_id: claude-3-5-haiku-20241022
+    model_id: claude-3-haiku-20240307
     temperature: 0.7
     max_tokens: 300
 
@@ -120,24 +120,31 @@ models:
   # Models are auto-pulled if not available locally.
   # Requires Ollama running: `ollama serve`
 
-  - name: llama3.2
+  # Best multilingual open model (Hebrew/Arabic)
+  - name: qwen2.5-7b
     backend: ollama
-    model_id: llama3.2:latest
-    temperature: 0.7
-    max_tokens: 300
-    # base_url: http://localhost:11434  # Default, can be omitted
-
-  - name: mistral
-    backend: ollama
-    model_id: mistral:latest
+    model_id: qwen2.5:7b
     temperature: 0.7
     max_tokens: 300
 
-  - name: phi3
+  # Alternative multilingual (purpose-built)
+  - name: aya-23-8b
     backend: ollama
-    model_id: phi3:latest
+    model_id: aya:8b
     temperature: 0.7
     max_tokens: 300
+
+  # - name: mistral
+  #   backend: ollama
+  #   model_id: mistral:latest
+  #   temperature: 0.7
+  #   max_tokens: 300
+
+  # - name: phi3
+  #   backend: ollama
+  #   model_id: phi3:latest
+  #   temperature: 0.7
+  #   max_tokens: 300
 
   # =========================================================================
   # HuggingFace Transformers (Local GPU Inference)
@@ -163,7 +170,7 @@ models:
     model_id: microsoft/Phi-3-mini-4k-instruct
     temperature: 0.7
     max_tokens: 300
-    device: cuda  # Change to 'mps' for Apple Silicon or 'cpu'
+    device: mps  # Change to 'mps' for Apple Silicon or 'cpu'
 
   # Uncomment for smaller/faster model:
   # - name: qwen-0.5b
@@ -171,9 +178,15 @@ models:
   #   model_id: Qwen/Qwen2.5-0.5B-Instruct
   #   temperature: 0.7
   #   max_tokens: 300
-  #   device: cpu  # Small enough for CPU
+  #   device: mps  # Small enough for CPU
 
-
+  # The "Shoggoth" - unaligned base model for comparison
+  - name: qwen2.5-base-UNSAFE
+    backend: huggingface
+    model_id: Qwen/Qwen2.5-7B  # Base model, no safety tuning
+    temperature: 0.7
+    max_tokens: 300
+    device: mps  # or mps for your M1
 # API Keys
 # --------
 # Use environment variables for security. Set them before running:

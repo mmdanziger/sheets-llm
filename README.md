@@ -78,13 +78,13 @@ Edit `models.yaml` to select which models to use. See the file for detailed docu
 ```bash
 # Batch mode: process all prompts once
 python sheets_inference.py \
-  --sheet-url "https://docs.google.com/spreadsheets/d/YOUR_SHEET_ID/edit" \
+  --sheet-url "https://docs.google.com/spreadsheets/d/1n_A4L6e8KMR57oL-W5U1woTHMAe7lvfrz9nRKAwOteY/edit" \
   --config models.yaml \
   --mode batch
 
 # Live mode: continuously poll for new prompts
 python sheets_inference.py \
-  --sheet-url "https://docs.google.com/spreadsheets/d/YOUR_SHEET_ID/edit" \
+  --sheet-url "https://docs.google.com/spreadsheets/d/1n_A4L6e8KMR57oL-W5U1woTHMAe7lvfrz9nRKAwOteY/edit" \
   --config models.yaml \
   --mode live \
   --poll-interval 30

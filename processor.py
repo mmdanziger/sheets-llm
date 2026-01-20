@@ -158,7 +158,7 @@ class InferenceProcessor:
         """
         stats = ProcessingStats()
         
-        logger.info(f"\n--- Model: {model.name} ({model.backend}) ---")
+        logger.info(f"--- Model: {model.name} ({model.backend}) ---")
         
         # Get or create the model's worksheet
         worksheet = self.sheets.get_model_worksheet(model.name)

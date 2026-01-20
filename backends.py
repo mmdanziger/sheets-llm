@@ -466,7 +466,7 @@ class HuggingFaceBackend(LLMBackend):
                 tokenizer = AutoTokenizer.from_pretrained(
                     model_config.model_id,
                     token=self.hf_token,
-                    trust_remote_code=True
+                    trust_remote_code=False
                 )
                 
                 # Load model with appropriate settings
@@ -475,7 +475,7 @@ class HuggingFaceBackend(LLMBackend):
                     token=self.hf_token,
                     torch_dtype=torch_dtype,
                     device_map=device if device != 'cpu' else None,
-                    trust_remote_code=True
+                    trust_remote_code=False
                 )
                 
                 if device == 'cpu':
@@ -648,6 +648,7 @@ def infer_with_retry(backend: LLMBackend,
             return backend.infer(prompt, model_config)
             
         except RateLimitError as e:
+            logger.warning(f"Rate limit encountered: {e}")
             last_error = e
             
             if attempt < max_retries:
