@@ -27,7 +27,8 @@ from backends import (
     infer_with_retry,
     AuthenticationError,
     ModelNotFoundError,
-    BackendError
+    BackendError,
+    HuggingFaceBackend
 )
 
 logger = logging.getLogger(__name__)
@@ -158,7 +159,7 @@ class InferenceProcessor:
         """
         stats = ProcessingStats()
         
-        logger.info(f"--- Model: {model.name} ({model.backend}) ---")
+        logger.info(f"\n--- Model: {model.name} ({model.backend}) ---")
         
         # Get or create the model's worksheet
         worksheet = self.sheets.get_model_worksheet(model.name)
@@ -179,7 +180,8 @@ class InferenceProcessor:
             stats.errors = len(prompts)
             return stats
         
-        # Process each prompt
+        # Filter prompts that need processing
+        prompts_to_process = []
         for prompt in prompts:
             status = statuses.get(prompt.row)
             
@@ -196,35 +198,119 @@ class InferenceProcessor:
                 stats.filled += 1  # Count as would-be-filled
                 continue
             
-            # Process the prompt
-            try:
-                result = self._process_prompt(
-                    worksheet=worksheet,
-                    prompt=prompt,
-                    model=model,
-                    backend=backend
-                )
-                
-                if result:
-                    stats.filled += 1
-                else:
-                    stats.errors += 1
+            prompts_to_process.append(prompt)
+        
+        if not prompts_to_process:
+            logger.info(f"  {model.name} complete: no prompts to process")
+            return stats
+        
+        # Use batch processing for HuggingFace backend
+        if backend.supports_batching() and len(prompts_to_process) > 1:
+            batch_stats = self._process_batch(
+                worksheet=worksheet,
+                prompts=prompts_to_process,
+                model=model,
+                backend=backend
+            )
+            stats.filled += batch_stats.filled
+            stats.errors += batch_stats.errors
+        else:
+            # Process sequentially for other backends
+            for prompt in prompts_to_process:
+                try:
+                    result = self._process_prompt(
+                        worksheet=worksheet,
+                        prompt=prompt,
+                        model=model,
+                        backend=backend
+                    )
                     
-            except AuthenticationError as e:
-                logger.error(f"Authentication failed for {model.name}: {e}")
-                # Mark all remaining prompts as errors
-                stats.errors += len(prompts) - stats.filled - stats.skipped
-                break  # Stop processing this model
-                
-            except ModelNotFoundError as e:
-                logger.error(f"Model not found: {e}")
-                stats.errors += len(prompts) - stats.filled - stats.skipped
-                break
+                    if result:
+                        stats.filled += 1
+                    else:
+                        stats.errors += 1
+                        
+                except AuthenticationError as e:
+                    logger.error(f"Authentication failed for {model.name}: {e}")
+                    stats.errors += len(prompts_to_process) - stats.filled
+                    break
+                    
+                except ModelNotFoundError as e:
+                    logger.error(f"Model not found: {e}")
+                    stats.errors += len(prompts_to_process) - stats.filled
+                    break
         
         logger.info(
             f"  {model.name} complete: "
             f"filled={stats.filled}, skipped={stats.skipped}, errors={stats.errors}"
         )
+        
+        return stats
+    
+    def _process_batch(self,
+                       worksheet,
+                       prompts: list[Prompt],
+                       model: ModelConfig,
+                       backend,
+                       batch_size: int = 8) -> ProcessingStats:
+        """
+        Process prompts in batches using HuggingFace batch inference.
+        
+        Args:
+            worksheet: The model's worksheet
+            prompts: List of prompts to process
+            model: Model configuration
+            backend: HuggingFace backend instance
+            batch_size: Number of prompts per batch
+        
+        Returns:
+            ProcessingStats for this batch operation
+        """
+        stats = ProcessingStats()
+        
+        logger.info(f"  Using batch inference (batch_size={batch_size}, total={len(prompts)})")
+        
+        # Mark all as processing first
+        for prompt in prompts:
+            try:
+                self.sheets.set_processing(worksheet, prompt.row, prompt)
+            except Exception as e:
+                logger.error(f"  Row {prompt.row}: failed to set PROCESSING: {e}")
+        
+        # Process in batches
+        for i in range(0, len(prompts), batch_size):
+            batch_prompts = prompts[i:i + batch_size]
+            batch_texts = [p.text for p in batch_prompts]
+            
+            logger.info(f"  Processing batch {i//batch_size + 1} ({len(batch_prompts)} prompts)...")
+            
+            try:
+                results = backend.infer_batch(batch_texts, model, batch_size=batch_size)
+                
+                # Write results
+                for prompt, result in zip(batch_prompts, results):
+                    try:
+                        self.sheets.write_response(
+                            worksheet=worksheet,
+                            row=prompt.row,
+                            response=result.response,
+                            tokens=result.tokens
+                        )
+                        stats.filled += 1
+                        logger.debug(f"  Row {prompt.row}: done ({result.tokens or '?'} tokens)")
+                    except Exception as e:
+                        logger.error(f"  Row {prompt.row}: failed to write response: {e}")
+                        stats.errors += 1
+                        
+            except BackendError as e:
+                logger.error(f"  Batch failed: {e}")
+                # Mark all prompts in this batch as errors
+                for prompt in batch_prompts:
+                    try:
+                        self.sheets.write_error(worksheet, prompt.row, str(e))
+                    except Exception:
+                        pass
+                    stats.errors += 1
         
         return stats
     

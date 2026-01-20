@@ -88,6 +88,18 @@ class LLMBackend(ABC):
     def is_available(self) -> bool:
         """Check if the backend is available (dependencies installed)."""
         pass
+    
+    def supports_batching(self) -> bool:
+        """Check if this backend supports batch inference. Override in subclasses."""
+        return False
+    
+    def infer_batch(self, prompts: list[str], model_config: ModelConfig,
+                    batch_size: int = 8) -> list[InferenceResult]:
+        """
+        Batch inference for multiple prompts. Override in subclasses that support batching.
+        Default implementation falls back to sequential inference.
+        """
+        return [self.infer(prompt, model_config) for prompt in prompts]
 
 
 class OpenAIBackend(LLMBackend):
@@ -558,6 +570,88 @@ class HuggingFaceBackend(LLMBackend):
             if isinstance(e, (AuthenticationError, BackendError)):
                 raise
             raise BackendError(f"HuggingFace inference error: {e}")
+    
+    def infer_batch(self, prompts: list[str], model_config: ModelConfig, 
+                    batch_size: int = 8) -> list[InferenceResult]:
+        """
+        Batch inference for multiple prompts.
+        
+        Significantly faster than sequential inference on GPU.
+        Reference: https://huggingface.co/docs/transformers/main_classes/pipelines#pipeline-batching
+        
+        Args:
+            prompts: List of prompt strings
+            model_config: Model configuration
+            batch_size: Number of prompts to process at once (default: 8)
+        
+        Returns:
+            List of InferenceResult, one per prompt
+        """
+        try:
+            pipe = self._get_pipeline(model_config)
+            
+            # Prepare all prompts with chat template
+            full_prompts = []
+            for prompt in prompts:
+                if model_config.system_prompt:
+                    if hasattr(pipe.tokenizer, 'apply_chat_template'):
+                        messages = [
+                            {"role": "system", "content": model_config.system_prompt},
+                            {"role": "user", "content": prompt}
+                        ]
+                        full_prompt = pipe.tokenizer.apply_chat_template(
+                            messages,
+                            tokenize=False,
+                            add_generation_prompt=True
+                        )
+                    else:
+                        full_prompt = f"{model_config.system_prompt}\n\nUser: {prompt}\n\nAssistant:"
+                else:
+                    if hasattr(pipe.tokenizer, 'apply_chat_template'):
+                        messages = [{"role": "user", "content": prompt}]
+                        full_prompt = pipe.tokenizer.apply_chat_template(
+                            messages,
+                            tokenize=False,
+                            add_generation_prompt=True
+                        )
+                    else:
+                        full_prompt = prompt
+                full_prompts.append(full_prompt)
+            
+            # Batch generate with pipeline
+            # Reference: https://huggingface.co/docs/transformers/main_classes/pipelines#pipeline-batching
+            outputs = pipe(
+                full_prompts,
+                max_new_tokens=model_config.max_tokens,
+                temperature=model_config.temperature if model_config.temperature > 0 else None,
+                do_sample=model_config.temperature > 0,
+                return_full_text=False,
+                pad_token_id=pipe.tokenizer.eos_token_id,
+                batch_size=batch_size
+            )
+            
+            # Process results
+            results = []
+            for output in outputs:
+                generated_text = output[0]['generated_text']
+                tokens = len(pipe.tokenizer.encode(generated_text))
+                
+                results.append(InferenceResult(
+                    response=generated_text.strip(),
+                    tokens=tokens,
+                    finish_reason='stop'
+                ))
+            
+            return results
+            
+        except Exception as e:
+            if isinstance(e, (AuthenticationError, BackendError)):
+                raise
+            raise BackendError(f"HuggingFace batch inference error: {e}")
+    
+    def supports_batching(self) -> bool:
+        """Check if this backend supports batch inference."""
+        return True
 
 
 class BackendFactory:
@@ -648,7 +742,6 @@ def infer_with_retry(backend: LLMBackend,
             return backend.infer(prompt, model_config)
             
         except RateLimitError as e:
-            logger.warning(f"Rate limit encountered: {e}")
             last_error = e
             
             if attempt < max_retries:
