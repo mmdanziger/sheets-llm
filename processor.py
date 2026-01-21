@@ -172,15 +172,7 @@ class InferenceProcessor:
         prompt_rows = [p.row for p in prompts]
         statuses = self.sheets.batch_get_statuses(worksheet, prompt_rows)
         
-        # Get backend (may fail if dependencies not installed)
-        try:
-            backend = self.backend_factory.get_backend(model.backend)
-        except (ValueError, ImportError) as e:
-            logger.error(f"Cannot initialize backend for {model.name}: {e}")
-            stats.errors = len(prompts)
-            return stats
-        
-        # Filter prompts that need processing
+        # Filter prompts that need processing BEFORE loading backend
         prompts_to_process = []
         for prompt in prompts:
             status = statuses.get(prompt.row)
@@ -191,20 +183,29 @@ class InferenceProcessor:
                 stats.skipped += 1
                 continue
             
-            # Dry run mode
+            # Dry run mode - count but don't add to processing list
             if dry_run:
                 action = "would reprocess" if status and status.has_response else "would process"
                 logger.info(f"  Row {prompt.row}: {action} - {prompt.text[:50]}...")
-                stats.filled += 1  # Count as would-be-filled
+                stats.filled += 1
                 continue
             
             prompts_to_process.append(prompt)
         
+        # Early exit if nothing to process - don't load backend
         if not prompts_to_process:
-            logger.info(f"  {model.name} complete: no prompts to process")
+            logger.info(f"  {model.name} complete: filled={stats.filled}, skipped={stats.skipped}, errors=0")
             return stats
         
-        # Use batch processing for HuggingFace backend
+        # NOW load the backend (lazy loading)
+        try:
+            backend = self.backend_factory.get_backend(model.backend)
+        except (ValueError, ImportError) as e:
+            logger.error(f"Cannot initialize backend for {model.name}: {e}")
+            stats.errors = len(prompts_to_process)
+            return stats
+        
+        # Use batch processing for backends that support it
         if backend.supports_batching() and len(prompts_to_process) > 1:
             batch_stats = self._process_batch(
                 worksheet=worksheet,
@@ -252,7 +253,7 @@ class InferenceProcessor:
                        prompts: list[Prompt],
                        model: ModelConfig,
                        backend,
-                       batch_size: int = 8) -> ProcessingStats:
+                       batch_size: int = 16) -> ProcessingStats:
         """
         Process prompts in batches using HuggingFace batch inference.
         

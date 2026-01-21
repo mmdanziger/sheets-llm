@@ -94,7 +94,7 @@ class LLMBackend(ABC):
         return False
     
     def infer_batch(self, prompts: list[str], model_config: ModelConfig,
-                    batch_size: int = 8) -> list[InferenceResult]:
+                    batch_size: int = 16) -> list[InferenceResult]:
         """
         Batch inference for multiple prompts. Override in subclasses that support batching.
         Default implementation falls back to sequential inference.
@@ -584,7 +584,7 @@ class HuggingFaceBackend(LLMBackend):
             raise BackendError(f"HuggingFace inference error: {e}")
     
     def infer_batch(self, prompts: list[str], model_config: ModelConfig, 
-                    batch_size: int = 8) -> list[InferenceResult]:
+                    batch_size: int = 16) -> list[InferenceResult]:
         """
         Batch inference for multiple prompts.
         
