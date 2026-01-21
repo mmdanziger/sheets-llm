@@ -148,8 +148,14 @@ models:
     max_tokens: 500
     device: cuda
 
-  - name: wizardlm-7b-uncensored
-    model_id: QuixiAI/WizardLM-7B-Uncensored 
+  # - name: wizardlm-7b-uncensored
+  #   model_id: QuixiAI/WizardLM-7B-Uncensored 
+  #   backend: huggingface
+  #   temperature: 0.7
+  #   max_tokens: 500
+  #   device: cuda
+  - name: dolphin-2.9-8b-uncensored
+    model_id: dphn/dolphin-2.9-llama3-8b
     backend: huggingface
     temperature: 0.7
     max_tokens: 500
