@@ -141,10 +141,16 @@ models:
   #   max_tokens: 300
   #   device: cuda
 
-  # The "Shoggoth" - unaligned base model
   - name: qwen2.5-7b-base-UNSAFE
     backend: huggingface
     model_id: Qwen/Qwen2.5-7B
+    temperature: 0.7
+    max_tokens: 500
+    device: cuda
+
+  - name: wizardlm-7b-uncensored
+    model_id: QuixiAI/WizardLM-7B-Uncensored 
+    backend: huggingface
     temperature: 0.7
     max_tokens: 500
     device: cuda
