@@ -486,12 +486,17 @@ class HuggingFaceBackend(LLMBackend):
                 torch_dtype = torch.float32  # CPU uses FP32
             
             try:
-                # Load tokenizer
+                # Load tokenizer with left padding for decoder-only models
                 tokenizer = AutoTokenizer.from_pretrained(
                     model_config.model_id,
                     token=self.hf_token,
-                    trust_remote_code=False
+                    trust_remote_code=False,
+                    padding_side='left'  # Required for batch generation
                 )
+                
+                # Ensure pad token is set
+                if tokenizer.pad_token is None:
+                    tokenizer.pad_token = tokenizer.eos_token
                 
                 # Load model with appropriate settings
                 model = AutoModelForCausalLM.from_pretrained(
@@ -530,10 +535,15 @@ class HuggingFaceBackend(LLMBackend):
         try:
             pipe = self._get_pipeline(model_config)
             
+            # Check if tokenizer has chat template
+            has_chat_template = (
+                hasattr(pipe.tokenizer, 'chat_template') and 
+                pipe.tokenizer.chat_template is not None
+            )
+            
             # Build the full prompt with system message if present
             if model_config.system_prompt:
-                # Use chat template if available
-                if hasattr(pipe.tokenizer, 'apply_chat_template'):
+                if has_chat_template:
                     messages = [
                         {"role": "system", "content": model_config.system_prompt},
                         {"role": "user", "content": prompt}
@@ -547,7 +557,7 @@ class HuggingFaceBackend(LLMBackend):
                     # Fallback for models without chat template
                     full_prompt = f"{model_config.system_prompt}\n\nUser: {prompt}\n\nAssistant:"
             else:
-                if hasattr(pipe.tokenizer, 'apply_chat_template'):
+                if has_chat_template:
                     messages = [{"role": "user", "content": prompt}]
                     full_prompt = pipe.tokenizer.apply_chat_template(
                         messages,
@@ -555,7 +565,7 @@ class HuggingFaceBackend(LLMBackend):
                         add_generation_prompt=True
                     )
                 else:
-                    full_prompt = prompt
+                    full_prompt = f"User: {prompt}\n\nAssistant:"
             
             # Generate
             outputs = pipe(
@@ -602,11 +612,17 @@ class HuggingFaceBackend(LLMBackend):
         try:
             pipe = self._get_pipeline(model_config)
             
+            # Check if tokenizer has chat template
+            has_chat_template = (
+                hasattr(pipe.tokenizer, 'chat_template') and 
+                pipe.tokenizer.chat_template is not None
+            )
+            
             # Prepare all prompts with chat template
             full_prompts = []
             for prompt in prompts:
                 if model_config.system_prompt:
-                    if hasattr(pipe.tokenizer, 'apply_chat_template'):
+                    if has_chat_template:
                         messages = [
                             {"role": "system", "content": model_config.system_prompt},
                             {"role": "user", "content": prompt}
@@ -619,7 +635,7 @@ class HuggingFaceBackend(LLMBackend):
                     else:
                         full_prompt = f"{model_config.system_prompt}\n\nUser: {prompt}\n\nAssistant:"
                 else:
-                    if hasattr(pipe.tokenizer, 'apply_chat_template'):
+                    if has_chat_template:
                         messages = [{"role": "user", "content": prompt}]
                         full_prompt = pipe.tokenizer.apply_chat_template(
                             messages,
@@ -627,7 +643,7 @@ class HuggingFaceBackend(LLMBackend):
                             add_generation_prompt=True
                         )
                     else:
-                        full_prompt = prompt
+                        full_prompt = f"User: {prompt}\n\nAssistant:"
                 full_prompts.append(full_prompt)
             
             # Batch generate with pipeline

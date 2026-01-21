@@ -199,13 +199,19 @@ def run_live(processor: 'InferenceProcessor',
     """Run continuous polling loop."""
     logger = logging.getLogger(__name__)
     
-    # Setup graceful shutdown
+    # Setup graceful shutdown with double-ctrl-c for force quit
     shutdown_requested = False
+    last_signal_time = 0.0
     
     def signal_handler(signum, frame):
-        nonlocal shutdown_requested
-        logger.info("\nShutdown requested, finishing current cycle...")
+        nonlocal shutdown_requested, last_signal_time
+        now = time.time()
+        if shutdown_requested and (now - last_signal_time) < 2.0:
+            logger.info("\nForce quit!")
+            sys.exit(1)
         shutdown_requested = True
+        last_signal_time = now
+        logger.info("\nShutdown requested, finishing current cycle... (Ctrl+C again to force quit)")
     
     signal.signal(signal.SIGINT, signal_handler)
     signal.signal(signal.SIGTERM, signal_handler)
