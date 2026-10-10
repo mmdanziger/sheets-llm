@@ -208,3 +208,4 @@ __marimo__/
 
 sheets_env/
 .github/copilot-instructions.md
+.DS_Store

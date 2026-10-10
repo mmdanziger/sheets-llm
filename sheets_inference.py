@@ -98,9 +98,10 @@ Examples:
     # Mode selection
     parser.add_argument(
         '--mode',
-        choices=['batch', 'live'],
+        choices=['batch', 'live', 'stream'],
         default='batch',
-        help='Operating mode: batch (run once) or live (continuous polling)'
+        help='Operating mode: batch (run once), live (continuous polling), or '
+             'stream (low-latency live: new prompts go to all models in parallel)'
     )
     parser.add_argument(
         '--poll-interval',
@@ -321,6 +322,14 @@ def main():
             )
             sys.exit(1 if stats['errors'] > 0 else 0)
             
+        elif args.mode == 'stream':
+            from stream import run_stream
+            run_stream(
+                processor=processor,
+                model_filter=model_filter,
+                poll_interval=args.poll_interval,
+            )
+
         else:  # live mode
             run_live(
                 processor=processor,
