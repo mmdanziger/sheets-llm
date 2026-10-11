@@ -85,9 +85,12 @@ python sheets_inference.py \
 # Live mode: continuously poll for new prompts
 python sheets_inference.py \
   --sheet-url "https://docs.google.com/spreadsheets/d/1n_A4L6e8KMR57oL-W5U1woTHMAe7lvfrz9nRKAwOteY/edit" \
-  --config models.yaml \
+  --config models_no_llama.yaml \
   --mode live \
   --poll-interval 30
+
+# Stream mode: lowest latency, for live class sessions (see "Running a live session")
+python sheets_inference.py --sheet-url URL --config models.yaml --mode stream --poll-interval 2
 ```
 
 ## Usage
@@ -100,8 +103,10 @@ Required:
   --config FILE         Path to YAML configuration file
 
 Mode:
-  --mode {batch,live}   batch: run once; live: continuous polling (default: batch)
-  --poll-interval N     Seconds between polls in live mode (default: 10)
+  --mode {batch,live,stream}
+                        batch: run once; live: continuous polling;
+                        stream: low-latency live mode for class (default: batch)
+  --poll-interval N     Seconds between polls in live/stream mode (default: 10)
 
 Filtering:
   --models LIST         Comma-separated model names to process (default: all)
@@ -161,6 +166,27 @@ python sheets_inference.py --sheet-url URL --config models.yaml --force
 | `claude-3-5-sonnet-20241022` | 200k | Balanced |
 | `claude-3-5-haiku-20241022` | 200k | Fastest |
 | `claude-3-opus-20240229` | 200k | Most capable |
+
+### OpenAI-compatible endpoints (DeepSeek, Kimi, OpenRouter)
+
+Any OpenAI-compatible API works through the `openai` backend: set `base_url` and a per-model `api_key`.
+
+```yaml
+- name: kimi-k2.6
+  backend: openai
+  base_url: https://openrouter.ai/api/v1
+  api_key: ${OPENROUTER_API_KEY}
+  model_id: moonshotai/kimi-k2.6
+  max_tokens: 1500
+```
+
+| Provider | base_url | Example model_id |
+|----------|----------|------------------|
+| OpenRouter | `https://openrouter.ai/api/v1` | `deepseek/deepseek-v4.1-flash`, `moonshotai/kimi-k2.6` |
+| DeepSeek | `https://api.deepseek.com` | `deepseek-chat` |
+| Moonshot | `https://api.moonshot.ai/v1` | see platform.moonshot.ai |
+
+Reasoning models spend tokens thinking before they answer, so give them a generous `max_tokens`.
 
 ### Ollama (Local)
 
@@ -234,17 +260,63 @@ python sheets_inference.py --sheet-url URL --config models.yaml --mode batch
 #    - Read-only: For analysis (File > Share > Viewer)
 #    - Read-write: For experimentation (File > Make a copy)
 
-# 4. For live sessions, run in live mode
-python sheets_inference.py --sheet-url URL --config models.yaml \
-  --mode live --poll-interval 10
+# 4. For live sessions, run in stream mode (see below)
 ```
+
+### Running a live session
+
+Use stream mode. It sends each new prompt to all models in parallel and polls only the
+`Prompts` tab, so answers start arriving within seconds. Live mode runs models one after
+another and re-reads every tab each cycle, so it is much slower with many models.
+
+```bash
+source sheets_env/bin/activate
+caffeinate -i python sheets_inference.py \
+  --sheet-url URL --config models.yaml \
+  --mode stream --poll-interval 2 --log-file session.log
+```
+
+- `--poll-interval 2` is about 30 Sheets reads/min plus batched writes, under the
+  60 req/min quota. `1` hits the quota and causes retries; `3` leaves more margin. Without the flag it waits 10 s.
+- Start it a few minutes before class. Its first pass fills anything already pending and
+  confirms that the service account and every API key work.
+- `caffeinate -i` (macOS) keeps the laptop from sleeping mid-session.
+- `--models a,b,c` limits cost if you don't need the whole lineup.
+- Editing an already-submitted prompt does not re-run it; students should add a new row.
+  Afterwards, re-run edited rows with `--mode batch --force --prompt-range N-M`.
+- Students can view answers and submit prompts through the web viewer in `viewer/`.
+
+### Grading the results with an LLM judge
+
+After the session, `judge.py` grades every answered cell against the four categories from
+the lecture (safety, privacy, hallucination, bias). The rubric is in `judge_rubric.md`. Each
+response gets a violation category, subtype, severity 0-4 (none, minor, moderate, serious,
+critical), a refused flag and short notes. Grades go to a `Judge` tab in the same sheet and
+to `judgments.csv`. The tab uses the columns students submit: row number, prompt, response,
+violation, model, severity, notes.
+
+```bash
+python judge.py --sheet-url URL --config models.yaml --dry-run   # what would be graded
+python judge.py --sheet-url URL --config models.yaml
+JUDGE_MODEL=claude-opus-5-5 python judge.py --sheet-url URL --config models.yaml --force
+```
+
+- The judge defaults to `claude-haiku-5-5`, which is cheap enough for a demo. Use
+  `--judge-model` or `JUDGE_MODEL` for a stronger model when the grades matter.
+- Cells are cached by their prompt and response text, so re-running only grades new or
+  changed answers. `--models` and `--prompt-range` work as above, `--no-sheet` writes only
+  the CSV, and `--force` re-grades everything.
+- If the judge's own safety filter refuses a cell, the cell is marked `ERROR`. That usually
+  means the response is itself dangerous, so review it by hand.
+- In Claude Code, the `/judge` skill (`.claude/skills/judge/`) runs this and summarizes
+  which attacks broke which models.
 
 ### Student Workflow
 
 Students can:
 1. Download the read-only sheet as CSV for analysis
 2. Add new prompts to their copy
-3. Instructor runs live mode to auto-fill responses
+3. Instructor runs stream mode to auto-fill responses
 
 ## Error Handling
 
@@ -301,7 +373,12 @@ sheets_inference/
 ├── sheets_io.py         # Google Sheets I/O, rate limiting
 ├── backends.py          # LLM backend abstraction
 ├── processor.py         # Orchestration logic
+├── stream.py            # Low-latency live mode
+├── judge.py             # LLM-as-judge grading of the results
+├── judge_rubric.md      # Judge rubric (safety, privacy, hallucination, bias)
 ├── models.yaml          # Configuration file
+├── viewer/              # Apps Script web app for the sheet
+├── .claude/skills/judge # Claude Code /judge skill
 ├── requirements.txt     # Python dependencies
 └── README.md            # This file
 ```

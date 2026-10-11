@@ -106,27 +106,38 @@ class OpenAIBackend(LLMBackend):
     """
     OpenAI Chat Completions API backend.
     
-    Supports all OpenAI chat models including GPT-4o, GPT-4, GPT-3.5-turbo.
-    
+    Supports all OpenAI chat models including GPT-4o, GPT-4, GPT-3.5-turbo,
+    and any OpenAI-compatible endpoint via the model's base_url/api_key
+    (OpenRouter, DeepSeek, Moonshot/Kimi).
+
     Reference: https://platform.openai.com/docs/api-reference/chat/create
-    
+
     Rate Limits (vary by tier):
     - Tier 1: 500 RPM, 30,000 TPM
     - Tier 2: 5,000 RPM, 450,000 TPM
     - Tier 3+: Higher limits
     """
-    
-    def __init__(self, api_key: str):
+
+    def __init__(self, api_key: Optional[str]):
         self.api_key = api_key
-        self._client = None
-    
-    @property
-    def client(self):
-        """Lazy-load OpenAI client."""
-        if self._client is None:
+        self._clients = {}  # Cache clients by (base_url, api_key)
+
+    def _client_for(self, model_config: ModelConfig):
+        """Lazy-load an OpenAI client for the model's endpoint."""
+        api_key = model_config.api_key or self.api_key
+        if not api_key:
+            raise AuthenticationError(
+                f"No API key for model '{model_config.name}'. "
+                f"Set api_key on the model or api_keys.openai"
+            )
+        cache_key = (model_config.base_url, api_key)
+        if cache_key not in self._clients:
             from openai import OpenAI
-            self._client = OpenAI(api_key=self.api_key)
-        return self._client
+            self._clients[cache_key] = OpenAI(
+                api_key=api_key,
+                base_url=model_config.base_url  # None means api.openai.com
+            )
+        return self._clients[cache_key]
     
     def is_available(self) -> bool:
         try:
@@ -157,18 +168,29 @@ class OpenAIBackend(LLMBackend):
             "content": prompt
         })
         
+        client = self._client_for(model_config)
+
         try:
-            response = self.client.chat.completions.create(
-                model=model_config.model_id,
-                messages=messages,
-                temperature=model_config.temperature,
-                max_tokens=model_config.max_tokens
-            )
-            
+            kwargs = {
+                "model": model_config.model_id,
+                "messages": messages,
+                "max_tokens": model_config.max_tokens
+            }
+            if model_config.temperature is not None:
+                kwargs["temperature"] = model_config.temperature
+            if model_config.extra_body:
+                kwargs["extra_body"] = model_config.extra_body
+
+            response = client.chat.completions.create(**kwargs)
+
             choice = response.choices[0]
-            
+            content = choice.message.content or ''
+            if not content.strip() and choice.finish_reason == 'length':
+                # Reasoning models can spend the whole budget thinking
+                content = '[no answer: ran out of tokens while thinking; raise max_tokens]'
+
             return InferenceResult(
-                response=choice.message.content or '',
+                response=content,
                 tokens=response.usage.completion_tokens if response.usage else None,
                 finish_reason=choice.finish_reason or 'unknown'
             )
@@ -713,8 +735,7 @@ class BackendFactory:
         backend: LLMBackend
         
         if backend_name == 'openai':
-            if not self.api_keys.openai:
-                raise ValueError("OpenAI API key not configured")
+            # Key may also come per-model (OpenAI-compatible endpoints)
             backend = OpenAIBackend(self.api_keys.openai)
             
         elif backend_name == 'anthropic':

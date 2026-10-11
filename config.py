@@ -15,7 +15,9 @@ Configuration Schema:
         max_tokens: int     # Max response tokens (default: 300)
         # Backend-specific options:
         device: str         # For huggingface: cuda | mps | cpu
-        base_url: str       # For ollama: API endpoint
+        base_url: str       # For ollama: API endpoint; for openai: any
+                            # OpenAI-compatible endpoint (OpenRouter, DeepSeek, Moonshot)
+        api_key: str        # For openai with base_url: per-model key (${ENV_VAR} ok)
     
     api_keys:
       openai: str           # Can use ${ENV_VAR} syntax
@@ -48,11 +50,13 @@ class ModelConfig:
     name: str
     backend: str
     model_id: str
-    temperature: float = 0.7
+    temperature: Optional[float] = 0.7  # null = don't send (newer Claude models reject it)
     max_tokens: int = 300
     device: Optional[str] = None  # For HuggingFace: cuda, mps, cpu
-    base_url: Optional[str] = None  # For Ollama custom endpoint
+    base_url: Optional[str] = None  # Ollama endpoint, or OpenAI-compatible endpoint (OpenRouter, DeepSeek, Moonshot)
+    api_key: Optional[str] = None  # Per-model key for OpenAI-compatible endpoints; overrides api_keys.openai
     system_prompt: Optional[str] = None  # Optional system prompt
+    extra_body: Optional[dict] = None  # Extra request fields for openai backend, e.g. OpenRouter reasoning
     
     def __post_init__(self):
         """Validate model configuration."""
@@ -63,7 +67,7 @@ class ModelConfig:
                 f"Must be one of: {valid_backends}"
             )
         
-        if self.temperature < 0 or self.temperature > 2:
+        if self.temperature is not None and (self.temperature < 0 or self.temperature > 2):
             raise ValueError(
                 f"Temperature {self.temperature} out of range for model '{self.name}'. "
                 f"Must be between 0.0 and 2.0"
@@ -74,6 +78,12 @@ class ModelConfig:
                 f"max_tokens must be positive for model '{self.name}'"
             )
         
+        if self.api_key and re.search(r'\$\{[^}]+\}', self.api_key):
+            raise ValueError(
+                f"api_key for model '{self.name}' references an unset environment "
+                f"variable: {self.api_key}"
+            )
+
         if self.backend == 'huggingface' and not self.device:
             # Auto-detect device
             self.device = self._detect_device()
@@ -244,7 +254,9 @@ def load_config(config_path: Path) -> Config:
                 max_tokens=model_raw.get('max_tokens', 300),
                 device=model_raw.get('device'),
                 base_url=model_raw.get('base_url'),
-                system_prompt=model_raw.get('system_prompt')
+                api_key=model_raw.get('api_key'),
+                system_prompt=model_raw.get('system_prompt'),
+                extra_body=model_raw.get('extra_body')
             ))
         
         # API keys config
@@ -257,8 +269,12 @@ def load_config(config_path: Path) -> Config:
         
         # Validate required API keys for configured backends
         backends_used = {m.backend for m in models}
-        
-        if 'openai' in backends_used and not api_keys.openai:
+
+        # OpenAI-compatible models with their own api_key don't need the global key
+        needs_openai_key = any(
+            m.backend == 'openai' and not m.api_key for m in models
+        )
+        if needs_openai_key and not api_keys.openai:
             raise ValueError(
                 "OpenAI API key required but not configured. "
                 "Set api_keys.openai or OPENAI_API_KEY environment variable"

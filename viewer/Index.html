@@ -1,0 +1,307 @@
+<!DOCTYPE html>
+<html>
+<head>
+<base target="_top">
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Red-team viewer</title>
+<style>
+  :root {
+    --bg: #000; --fg: #F3F4F6; --muted: #9CA3AF; --line: #6B7280;
+    --prompt-bg: #374151; --gap: 10px; --bus: 26px;
+  }
+  * { box-sizing: border-box; }
+  html, body { margin: 0; background: var(--bg); color: var(--fg);
+    font: 15px/1.4 system-ui, -apple-system, "Segoe UI", Arial, sans-serif; }
+
+  header { position: sticky; top: 0; z-index: 5; background: var(--bg);
+    display: flex; gap: 8px; align-items: center; padding: 10px 16px;
+    border-bottom: 1px solid #1F2937; }
+  header button, header input { font: inherit; color: var(--fg); background: #111827;
+    border: 1px solid #374151; border-radius: 8px; height: 40px; }
+  header button { min-width: 40px; padding: 0 12px; cursor: pointer; }
+  header input { width: 4.2em; text-align: center; font-size: 20px; font-weight: 700;
+    letter-spacing: 1px; }
+  header .spacer { flex: 1; }
+  #sheet-link { color: var(--muted); font-size: 13px; white-space: nowrap; }
+  #ask-btn { background: #F3F4F6; color: #000; font-weight: 700; border: 0; }
+
+  main { padding: 12px 16px 24px; }
+  .meta { color: var(--muted); font-size: 13px; margin-bottom: 6px; }
+  .prompt { background: var(--prompt-bg); color: #fff; font-weight: 700; font-size: 17px;
+    padding: 12px 14px; border-radius: 4px; white-space: pre-wrap; position: relative; }
+  .empty { color: var(--muted); padding: 40px 0; text-align: center; }
+
+  .card { display: flex; flex-direction: column; position: relative; min-width: 0; }
+  .card .head { background: var(--c); color: #fff; font-weight: 700; font-size: 13px;
+    padding: 6px 8px; display: flex; justify-content: space-between; gap: 6px; }
+  .card .body { background: color-mix(in srgb, var(--c) 10%, #fff); color: #111;
+    border: 1.5px solid var(--c); border-top: 0; padding: 8px 9px; font-size: 14px; }
+  .card .body p { margin: 0 0 6px; white-space: pre-wrap; overflow-wrap: anywhere; }
+  .card.stale .body { opacity: .55; }
+  .note { font-style: italic; color: #4B5563; }
+  .st { font-weight: 600; opacity: .95; white-space: nowrap; }
+  .st.pending { animation: pulse 1.4s ease-in-out infinite; }
+  @keyframes pulse { 50% { opacity: .35; } }
+
+  /* Phone: vertical trunk with a branch into each card */
+  .tree { margin: 0 0 0 12px; padding: 14px 0 0 18px; border-left: 2px solid var(--line);
+    display: flex; flex-direction: column; gap: 14px; }
+  .tree .card::before { content: ""; position: absolute; left: -18px; top: 15px;
+    width: 18px; border-top: 2px solid var(--line); }
+
+  /* Wide: the slide layout, prompt on top, bus, one column per model */
+  @media (min-width: 900px) {
+    main { height: calc(100vh - 61px); display: flex; flex-direction: column; }
+    .prompt::after { content: ""; position: absolute; left: 50%; bottom: calc(-1 * var(--bus));
+      height: var(--bus); border-left: 2px solid var(--line); }
+    .tree { flex: 1; min-height: 0; margin: var(--bus) 0 0; padding: var(--bus) 0 0;
+      border-left: 0; display: grid; grid-template-columns: repeat(var(--n), minmax(0, 1fr));
+      gap: var(--gap); }
+    .tree { position: relative; }
+    .tree::after { content: ""; position: absolute; top: 0;
+      left: calc((100% - (var(--n) - 1) * var(--gap)) / var(--n) / 2);
+      right: calc((100% - (var(--n) - 1) * var(--gap)) / var(--n) / 2);
+      border-top: 2px solid var(--line); }
+    .tree .card::before { left: 50%; top: calc(-1 * var(--bus)); width: 0;
+      height: var(--bus); border-top: 0; border-left: 2px solid var(--line); }
+    .card .body { flex: 1; overflow-y: auto; font-size: 13.5px; }
+  }
+
+  #ask { position: fixed; inset: 0; background: rgba(0,0,0,.8); display: none;
+    align-items: flex-end; justify-content: center; z-index: 10; }
+  #ask.open { display: flex; }
+  #ask .sheet { background: #111827; width: 100%; max-width: 640px; padding: 16px;
+    border-radius: 14px 14px 0 0; }
+  #ask textarea, #ask input { width: 100%; font: inherit; color: var(--fg); background: #000;
+    border: 1px solid #374151; border-radius: 8px; padding: 10px; }
+  #ask textarea { min-height: 140px; resize: vertical; }
+  #ask .row { display: flex; gap: 8px; margin-top: 10px; }
+  #ask button { font: inherit; height: 42px; border-radius: 8px; border: 0; padding: 0 16px;
+    cursor: pointer; }
+  #ask .go { background: #F3F4F6; color: #000; font-weight: 700; flex: 1; }
+  #ask .cancel { background: #374151; color: var(--fg); }
+  #ask .hint, #mine { color: var(--muted); font-size: 13px; margin: 8px 0 0; }
+  #mine a { color: var(--fg); margin-right: 8px; }
+</style>
+</head>
+<body>
+<header>
+  <button id="prev" aria-label="Previous">&#9664;</button>
+  <input id="num" inputmode="numeric" autocomplete="off" aria-label="Prompt number">
+  <button id="next" aria-label="Next">&#9654;</button>
+  <button id="latest">Latest</button>
+  <span class="spacer"></span>
+  <a id="sheet-link" target="_blank" rel="noopener" hidden>Sheet &#8599;</a>
+  <button id="ask-btn">+ Ask</button>
+</header>
+<main id="view"><div class="empty">Loading…</div></main>
+
+<div id="ask">
+  <div class="sheet">
+    <textarea id="ask-text" dir="auto" placeholder="Your prompt. Hebrew welcome. No real patient data."></textarea>
+    <input id="ask-cat" dir="auto" placeholder="Your specialty (optional)" style="margin-top:8px">
+    <div class="row">
+      <button class="cancel" id="ask-cancel">Cancel</button>
+      <button class="go" id="ask-send">Send to all models</button>
+    </div>
+    <p class="hint" id="ask-msg">You'll get a number. Answers appear as each model finishes.</p>
+    <p id="mine"></p>
+  </div>
+</div>
+
+<script>
+const COLORS = [
+  [/unsafe|-base/i, '#B91C1C'], [/claude/i, '#D97757'], [/gpt|openai/i, '#10A37F'],
+  [/deepseek/i, '#4D6BFE'], [/kimi|moonshot/i, '#D97706'], [/llama/i, '#0467DF'],
+  [/mistral/i, '#EA580C'], [/qwen/i, '#615CED'], [/dolphin/i, '#0E7490'],
+  [/gemini/i, '#8E75B2'],
+];
+const FALLBACK = ['#0F766E', '#7C3AED', '#BE185D', '#4D7C0F', '#1D4ED8'];
+const POLL_MS = 3000;
+
+let current = null, last = null, timer = null, lastModels = [];
+
+// ── Server calls (google.script.run in Apps Script; a mock for local preview) ──
+const hasGAS = !!(window.google && google.script && google.script.run);
+function call(fn, ...args) {
+  if (!hasGAS) return Promise.resolve(window.MOCK[fn](...args));
+  return new Promise((ok, fail) =>
+    google.script.run.withSuccessHandler(ok).withFailureHandler(fail)[fn](...args));
+}
+
+// ── Per-viewer state lives only in this browser (URL + localStorage) ──
+function setUrl(r) {
+  if (hasGAS) google.script.history.replace(null, { r: String(r) });
+  else history.replaceState(null, '', '#' + r);
+}
+function readUrl() {
+  return new Promise(ok => {
+    if (hasGAS) google.script.url.getLocation(loc => ok(loc.parameter.r));
+    else ok(location.hash.slice(1));
+  });
+}
+function mine() {
+  try { return JSON.parse(localStorage.getItem('redteam-mine') || '[]'); } catch (e) { return []; }
+}
+function addMine(r) {
+  try { localStorage.setItem('redteam-mine', JSON.stringify([...new Set([...mine(), r])])); } catch (e) {}
+}
+
+// ── Rendering ──
+const esc = s => s.replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
+const paras = s => s.replace(/\n\s*\n+/g, '\n\n').split('\n').map(p => `<p dir="auto">${esc(p) || '&nbsp;'}</p>`).join('');
+function color(name, i) {
+  const hit = COLORS.find(([re]) => re.test(name));
+  return hit ? hit[1] : FALLBACK[i % FALLBACK.length];
+}
+function status(m) {
+  if (m.status === 'SENDING') return ['sending…', true];
+  if (m.stale) return ['⚠ row shifted', false];
+  if (m.status === 'DONE') return ['✓', false];
+  if (m.status === 'ERROR') return ['error', false];
+  if (m.status === 'PROCESSING') return ['thinking…', true];
+  return ['queued', true];
+}
+
+function render(d) {
+  const view = document.getElementById('view');
+  last = d.last;
+  if (d.missing) {
+    view.innerHTML = `<div class="empty">No prompt #${d.row} yet. Latest is #${d.last}.</div>`;
+    return false;
+  }
+  if (d.blank) {
+    view.innerHTML = `<div class="empty">Row #${d.row} is empty. Try ◀ ▶.</div>`;
+    return false;
+  }
+  let pending = false;
+  lastModels = d.models.map(m => m.name);
+  const cards = d.models.map((m, i) => {
+    const [label, isPending] = status(m);
+    pending = pending || isPending;
+    let body;
+    if (m.stale) body = `<p class="note">This answer belongs to a different prompt (rows were moved after it ran).</p>`;
+    else if (m.status === 'ERROR') body = `<p class="note">${esc(m.error || 'Error')}</p>`;
+    else if (m.status === 'SENDING') body = `<p class="note">Sending your prompt…</p>`;
+    else if (!m.response) body = `<p class="note">Waiting for this model…</p>`;
+    else body = paras(m.response);
+    return `<div class="card${m.stale ? ' stale' : ''}" style="--c:${color(m.name, i)}">
+      <div class="head"><span>${esc(m.name)}</span>
+        <span class="st${isPending ? ' pending' : ''}">${label}</span></div>
+      <div class="body">${body}</div></div>`;
+  }).join('');
+  view.innerHTML = `
+    <div class="meta">Prompt #${d.row}${d.category ? ' · ' + esc(d.category) : ''}</div>
+    <div class="prompt" dir="auto">${esc(d.prompt)}</div>
+    <div class="tree" style="--n:${d.models.length}">${cards}</div>`;
+  return pending;
+}
+
+// ── Local copy of the sheet: browsing renders from memory, a background sync
+//    fetches only rows that aren't complete yet (plus new ones) ──
+const store = {};
+let synced = false, syncing = false, wantLatest = false;
+
+const complete = d => d.blank || (d.models && d.models.every(
+  m => m.stale || m.status === 'DONE' || m.status === 'ERROR'));
+
+function show(r) {
+  if (r !== current) return;
+  const d = store[r] || (synced && r > last ? { row: r, last, missing: true } : null);
+  if (d) render(d);
+  else document.getElementById('view').innerHTML = '<div class="empty">Loading…</div>';
+}
+
+function sync() {
+  if (syncing) return;
+  syncing = true;
+  const have = Object.keys(store).filter(r => complete(store[r])).map(Number);
+  call('getAll', have).then(res => {
+    last = res.last;
+    Object.assign(store, res.rows);
+    synced = true;
+    if (wantLatest) { wantLatest = false; go(last); }
+    else if (current > 0) show(current);
+  }).catch(() => {}).finally(() => {
+    syncing = false;
+    clearTimeout(timer);
+    const pending = Object.values(store).some(d => !complete(d));
+    timer = setTimeout(sync, pending ? POLL_MS : POLL_MS * 2);
+  });
+}
+
+function go(r) {
+  r = Math.max(2, Math.floor(Number(r)) || 0);  // row 1 is the header
+  current = r;
+  document.getElementById('num').value = r;
+  setUrl(r);
+  show(r);
+}
+function latest() {
+  if (synced) go(last);
+  else wantLatest = true;
+}
+
+// ── Controls: buttons, number box, arrow keys, swipe ──
+const $ = id => document.getElementById(id);
+$('prev').onclick = () => go(current - 1);
+$('next').onclick = () => go(current + 1);
+$('latest').onclick = latest;
+$('num').addEventListener('keydown', e => { if (e.key === 'Enter') { go(e.target.value); e.target.blur(); } });
+$('num').addEventListener('focus', e => e.target.select());
+document.addEventListener('keydown', e => {
+  if (e.target.matches('input, textarea')) return;
+  if (e.key === 'ArrowLeft') go(current - 1);
+  if (e.key === 'ArrowRight') go(current + 1);
+});
+let x0 = null;
+document.addEventListener('touchstart', e => { x0 = e.touches[0].clientX; }, { passive: true });
+document.addEventListener('touchend', e => {
+  if (x0 === null) return;
+  const dx = e.changedTouches[0].clientX - x0; x0 = null;
+  if (Math.abs(dx) > 70 && !e.target.closest('#ask')) go(current + (dx < 0 ? 1 : -1));
+});
+
+function showMine() {
+  const m = mine();
+  $('mine').innerHTML = m.length ? 'Yours: ' + m.map(r => `<a href="#" data-r="${r}">#${r}</a>`).join('') : '';
+}
+$('mine').onclick = e => { const r = e.target.dataset.r; if (r) { e.preventDefault(); $('ask').classList.remove('open'); go(r); } };
+$('ask-btn').onclick = () => { showMine(); $('ask').classList.add('open'); $('ask-text').focus(); };
+$('ask-cancel').onclick = () => $('ask').classList.remove('open');
+$('ask-send').onclick = () => {
+  const text = $('ask-text').value.trim();
+  if (!text) return;
+  const category = $('ask-cat').value.trim();
+  // Show the prompt right away; the server round trip takes a few seconds
+  current = -1;
+  $('num').value = '…';
+  $('ask').classList.remove('open');
+  $('ask-send').disabled = true;
+  const names = lastModels.length ? lastModels : ['all models'];
+  render({ row: '…', last, prompt: text, category,
+           models: names.map(name => ({ name, status: 'SENDING', response: '' })) });
+  document.querySelector('.meta').textContent = 'Sending…';
+  call('submitPrompt', text, category).then(d => {
+    addMine(d.row);
+    $('ask-text').value = '';
+    $('ask-msg').textContent = `Sent. Your prompt is #${d.row}.`;
+    store[d.row] = d;
+    last = Math.max(last || 0, d.row);
+    go(d.row);
+  }).catch(e => {
+    $('ask').classList.add('open');
+    $('ask-msg').textContent = 'Failed to send: ' + (e.message || e) + '. Your text is still here; try again.';
+  }).finally(() => { $('ask-send').disabled = false; });
+};
+
+readUrl().then(r => { if (r) go(r); else latest(); sync(); });
+if (hasGAS) call('getSheetUrl').then(url => {
+  const a = document.getElementById('sheet-link');
+  a.href = url;
+  a.hidden = false;
+}).catch(() => {});
+</script>
+</body>
+</html>
