@@ -7,7 +7,7 @@
 # - gspread: https://docs.gspread.org/en/v6.1.4/
 # - google-auth: https://google-auth.readthedocs.io/
 # - openai: https://platform.openai.com/docs/libraries/python-library
-# - anthropic: https://docs.anthropic.com/en/api/client-sdks
+# - anthropic: https://platform.claude.com/docs/en/api/client-sdks
 # - ollama: https://github.com/ollama/ollama-python
 # - transformers: https://huggingface.co/docs/transformers/
 # - torch: https://pytorch.org/docs/stable/
@@ -20,8 +20,8 @@ google-auth-oauthlib>=1.2.0     # OAuth support (if needed)
 
 # LLM API Clients
 # ---------------
-openai>=1.54.0,<2.0.0           # OpenAI Python SDK (GPT-4o, etc.)
-anthropic>=0.39.0,<1.0.0        # Anthropic Python SDK (Claude 3.5, etc.)
+openai>=1.54.0,<2.0.0           # OpenAI SDK, also used for OpenRouter/DeepSeek/Moonshot
+anthropic>=0.39.0,<1.0.0        # Anthropic SDK (Claude backend and judge.py)
 ollama>=0.3.0,<1.0.0            # Ollama Python client
 
 # HuggingFace (Optional - for local inference)

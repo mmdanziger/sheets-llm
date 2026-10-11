@@ -2,8 +2,8 @@
 """
 Google Sheets LLM Inference System
 
-A production-ready script that fills Google Sheet cells with LLM responses.
-Supports batch (one-pass) and live (continuous polling) modes.
+A script that fills Google Sheet cells with LLM responses.
+Supports batch (one-pass), live (continuous polling) and stream (low-latency live) modes.
 
 Usage:
     # Batch mode: run once, exit
@@ -16,7 +16,7 @@ Reference Documentation:
 - gspread: https://docs.gspread.org/en/v6.1.4/
 - Google Sheets API: https://developers.google.com/sheets/api/reference/rest
 - OpenAI API: https://platform.openai.com/docs/api-reference/chat
-- Anthropic API: https://docs.anthropic.com/en/api/messages
+- Anthropic API: https://platform.claude.com/docs/en/api/messages
 - Ollama API: https://github.com/ollama/ollama/blob/main/docs/api.md
 - HuggingFace Transformers: https://huggingface.co/docs/transformers/main_classes/pipelines
 
@@ -71,8 +71,8 @@ Examples:
   # Batch mode with all models
   python sheets_inference.py --sheet-url "https://docs.google.com/spreadsheets/d/..." --config models.yaml --mode batch
   
-  # Live mode with specific models
-  python sheets_inference.py --sheet-url "..." --config models.yaml --mode live --poll-interval 30 --models gpt-4,claude-3-opus
+  # Live mode with specific models (names are the `name:` fields in the config)
+  python sheets_inference.py --sheet-url "..." --config models.yaml --mode live --poll-interval 30 --models claude-haiku-5.5,gpt-4o-mini
   
   # Dry run to preview actions
   python sheets_inference.py --sheet-url "..." --config models.yaml --dry-run
@@ -107,7 +107,7 @@ Examples:
         '--poll-interval',
         type=int,
         default=10,
-        help='Seconds between polls in live mode (default: 10)'
+        help='Seconds between polls in live/stream mode (default: 10)'
     )
     
     # Filtering options

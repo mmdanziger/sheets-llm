@@ -320,45 +320,40 @@ google_sheets:
 # Model Definitions
 # -----------------
 # Each model creates a worksheet with the same name.
-# Supported backends: openai, anthropic, ollama, huggingface
+# Supported backends: openai (also any OpenAI-compatible endpoint), anthropic,
+# ollama, huggingface
 models:
-  # OpenAI GPT Models
+  # Anthropic Claude (native API)
+  # Reference: https://platform.claude.com/docs/en/about-claude/models/overview
+  - name: claude-haiku-5.5
+    backend: anthropic
+    model_id: claude-haiku-5-5
+    temperature: null  # current Claude models reject temperature; null = don't send
+    max_tokens: 1000
+
+  # OpenAI (native API)
   # Reference: https://platform.openai.com/docs/models
-  - name: gpt-4o
+  - name: gpt-6-luna
     backend: openai
-    model_id: gpt-4o
+    model_id: gpt-6-luna
     temperature: 0.7
-    max_tokens: 500
+    max_tokens: 1000
 
-  - name: gpt-4o-mini
+  # Any OpenAI-compatible endpoint: set base_url and a per-model api_key.
+  # OpenRouter IDs: https://openrouter.ai/models
+  - name: deepseek-v4.1-flash
     backend: openai
-    model_id: gpt-4o-mini
+    base_url: https://openrouter.ai/api/v1
+    api_key: ${OPENROUTER_API_KEY}
+    model_id: deepseek/deepseek-v4.1-flash
     temperature: 0.7
-    max_tokens: 500
+    max_tokens: 1500
+    extra_body:          # passed through to the provider
+      reasoning:
+        enabled: false
 
-  - name: gpt-3.5-turbo
-    backend: openai
-    model_id: gpt-3.5-turbo
-    temperature: 0.7
-    max_tokens: 300
-
-  # Anthropic Claude Models
-  # Reference: https://docs.anthropic.com/en/docs/about-claude/models
-  - name: claude-sonnet-4
-    backend: anthropic
-    model_id: claude-sonnet-4-20250514
-    temperature: 0.7
-    max_tokens: 500
-
-  - name: claude-3-5-haiku
-    backend: anthropic
-    model_id: claude-3-5-haiku-20241022
-    temperature: 0.7
-    max_tokens: 300
-
-  # Ollama Local Models
+  # Ollama local models (auto-pulled if not present)
   # Reference: https://ollama.com/library
-  # Models are auto-pulled if not present locally
   - name: llama3.2
     backend: ollama
     model_id: llama3.2:latest
@@ -366,19 +361,13 @@ models:
     max_tokens: 300
     base_url: http://localhost:11434  # Default Ollama endpoint
 
-  - name: mistral
-    backend: ollama
-    model_id: mistral:latest
-    temperature: 0.7
-    max_tokens: 300
-
   # HuggingFace Transformers (local GPU inference)
   # Reference: https://huggingface.co/models
-  - name: phi-3-mini
+  - name: qwen2.5-7b-instruct
     backend: huggingface
-    model_id: microsoft/Phi-3-mini-4k-instruct
+    model_id: Qwen/Qwen2.5-7B-Instruct
     temperature: 0.7
-    max_tokens: 300
+    max_tokens: 500
     device: cuda  # Options: cuda, mps (Apple Silicon), cpu
 
 # API Keys
@@ -386,7 +375,8 @@ models:
 # Use environment variables for security:
 #   export OPENAI_API_KEY=sk-...
 #   export ANTHROPIC_API_KEY=sk-ant-...
-# Or set them directly (not recommended for production)
+#   export OPENROUTER_API_KEY=sk-or-...   # referenced per model above
+# Or put them in a .env file next to this config
 api_keys:
   openai: ${OPENAI_API_KEY}
   anthropic: ${ANTHROPIC_API_KEY}

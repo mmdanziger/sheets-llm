@@ -52,7 +52,7 @@ Most models in `models.yaml` use `backend: openai` with a per-model `base_url` +
 ## Config files
 
 - `models.yaml`: the live red-teaming lineup. Its comments record the reasoning (expected robustness order, prices, why models are routed via OpenRouter); preserve and update them when editing. The credentials path is `${HOME}/.config/gspread/service_account.json`.
-- `models_no_llama.yaml`: older example config.
+- `models_no_llama.yaml`: local-GPU lineup (HuggingFace Qwen and Dolphin, `device: cuda`). Despite the name, it is not "`models.yaml` minus Llama".
 - Keys come from `OPENAI_API_KEY`, `ANTHROPIC_API_KEY`, `OPENROUTER_API_KEY` and `HF_TOKEN` (env or `.env`).
 
 ## viewer/

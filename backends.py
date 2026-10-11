@@ -2,8 +2,8 @@
 LLM Backend Abstraction for Google Sheets Inference System.
 
 Provides a unified interface for multiple LLM providers:
-- OpenAI (GPT-4o, GPT-4, GPT-3.5-turbo, etc.)
-- Anthropic (Claude 3.5, Claude 3 Opus, etc.)
+- OpenAI, and any OpenAI-compatible endpoint (OpenRouter, DeepSeek, Moonshot)
+- Anthropic Claude
 - Ollama (local models: Llama, Mistral, etc.)
 - HuggingFace Transformers (local GPU inference)
 
@@ -14,7 +14,7 @@ Each backend returns a standardized InferenceResult with:
 
 Reference Documentation:
 - OpenAI Chat API: https://platform.openai.com/docs/api-reference/chat/create
-- Anthropic Messages API: https://docs.anthropic.com/en/api/messages
+- Anthropic Messages API: https://platform.claude.com/docs/en/api/messages
 - Ollama API: https://github.com/ollama/ollama/blob/main/docs/api.md
 - HuggingFace Pipeline: https://huggingface.co/docs/transformers/main_classes/pipelines
 """
@@ -220,7 +220,7 @@ class AnthropicBackend(LLMBackend):
     
     Supports Claude 3.5 Sonnet, Claude 3 Opus, Claude 3 Haiku, etc.
     
-    Reference: https://docs.anthropic.com/en/api/messages
+    Reference: https://platform.claude.com/docs/en/api/messages
     
     Rate Limits (Tier 1):
     - 50 requests per minute

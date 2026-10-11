@@ -1,269 +1,209 @@
-# Google Sheets LLM Inference System
+# sheets-llm
 
-A production-ready Python system that fills Google Sheet cells with LLM responses. Supports batch (one-pass) and live (continuous polling) modes with multiple LLM backends.
+Fills Google Sheet cells with LLM responses, for classroom red-teaming. Each prompt in
+the sheet's `Prompts` tab goes to every model in a YAML config, and each model's answer
+lands in the same row of a tab named after that model. Students add prompts live and
+compare how models of different robustness respond. Afterwards an LLM judge grades every
+answer.
 
 ## Features
 
-- **Multi-model support**: OpenAI, Anthropic Claude, Ollama (local), HuggingFace Transformers
-- **Batch & Live modes**: One-time processing or continuous monitoring for new prompts
-- **Smart skip logic**: Automatically skips already-filled cells
-- **Auto-recovery**: Exponential backoff retry on rate limits
-- **Auto-provisioning**: Creates worksheets and pulls Ollama models automatically
-- **Comprehensive logging**: Console and file logging with progress tracking
+- **Any model, one config**: native Anthropic and OpenAI APIs, plus any OpenAI-compatible
+  endpoint (OpenRouter, DeepSeek, Moonshot) with a per-model `base_url` and `api_key`.
+  Also local models through Ollama or HuggingFace Transformers.
+- **Three modes**: `batch` (one pass), `live` (re-check everything on a poll) and `stream`
+  (low-latency live mode for class: each new prompt goes to all models in parallel).
+- **Skips filled cells**, so re-runs only fill what's missing (`--force` to redo).
+- **Web viewer** (`viewer/`): an Apps Script page for students to submit prompts and
+  read the answers side by side.
+- **LLM judge** (`judge.py`): grades every answer for safety, privacy, hallucination
+  and bias, with severity 0-4.
+- Retries on rate limits for both Google Sheets and the model APIs.
 
-## Quick Start
+## Quick start
 
-### 1. Install Dependencies
+### 1. Install
 
 ```bash
+python3 -m venv sheets_env
+source sheets_env/bin/activate
 pip install -r requirements.txt
 ```
 
-For GPU inference with HuggingFace:
-```bash
-# CUDA (NVIDIA)
-pip install torch --index-url https://download.pytorch.org/whl/cu121
+`requirements.txt` includes `transformers`/`torch` for the HuggingFace backend. If you
+only use API models you can skip those four lines.
 
-# Apple Silicon
-pip install torch  # MPS support is built-in
-```
+### 2. Google Sheets service account
 
-### 2. Set Up Google Sheets Authentication
+1. In the [Google Cloud Console](https://console.cloud.google.com/), create or pick a
+   project and enable the
+   [Google Sheets API](https://console.cloud.google.com/apis/library/sheets.googleapis.com).
+2. Create a [service account](https://console.cloud.google.com/iam-admin/serviceaccounts)
+   and download a JSON key.
+3. Save it as `~/.config/gspread/service_account.json`. That's the path both configs use
+   (`credentials_file:` in the YAML).
+4. Share the Google Sheet with the service account's email address as **Editor**.
 
-1. Go to [Google Cloud Console](https://console.cloud.google.com/)
-2. Create a new project (or select existing)
-3. Enable the [Google Sheets API](https://console.cloud.google.com/apis/library/sheets.googleapis.com)
-4. Create a Service Account:
-   - Go to [Service Accounts](https://console.cloud.google.com/iam-admin/serviceaccounts)
-   - Click "Create Service Account"
-   - Download the JSON key file
-   - Save as `service_account.json`
-5. Share your Google Sheet with the service account email (Editor access)
+Reference: [gspread service account auth](https://docs.gspread.org/en/v6.1.4/oauth2.html#for-bots-using-service-account)
 
-Reference: [gspread Authentication](https://docs.gspread.org/en/v6.1.4/oauth2.html#for-bots-using-service-account)
+### 3. API keys
 
-### 3. Set Up API Keys
+Set them in the environment, or in a `.env` file next to the config (or in the working
+directory):
 
 ```bash
-# Option 1: Environment variables
-export OPENAI_API_KEY=sk-proj-...
-export ANTHROPIC_API_KEY=sk-ant-api03-...
-
-# Option 2: Create .env file
-echo "OPENAI_API_KEY=sk-proj-..." > .env
-echo "ANTHROPIC_API_KEY=sk-ant-api03-..." >> .env
+ANTHROPIC_API_KEY=sk-ant-...     # Claude models, and judge.py
+OPENROUTER_API_KEY=sk-or-...     # every other model in models.yaml
+OPENAI_API_KEY=sk-proj-...       # only for models using the native OpenAI API
+HF_TOKEN=hf_...                  # only for gated HuggingFace models
 ```
 
-### 4. Prepare Your Google Sheet
+### 4. Prepare the sheet
 
-Create a Google Sheet with a "Prompts" worksheet:
+Create a tab named `Prompts`:
 
 | ID | Category | Prompt | Notes |
 |----|----------|--------|-------|
-| 1 | medical | What are the symptoms of diabetes? | Test case 1 |
-| 2 | ethics | Is it ethical to use AI in diagnosis? | Test case 2 |
-| 3 | safety | What are risks of AI hallucination? | Test case 3 |
+| 1 | safety | My 2 year old's blood sugar is 6 and ... | missed emergency? |
+| 2 | privacy | Draft a letter for the office lobby about ... | |
 
-The system will automatically create model-specific worksheets (e.g., "gpt-4o", "claude-3-5-sonnet") with columns:
+Model tabs are created automatically, one per `name:` in the config.
 
-| ID | Prompt | Response | Status | Timestamp | Tokens | Error |
-|----|--------|----------|--------|-----------|--------|-------|
-
-### 5. Configure Models
-
-Edit `models.yaml` to select which models to use. See the file for detailed documentation.
-
-### 6. Run
+### 5. Run
 
 ```bash
-# Batch mode: process all prompts once
-python sheets_inference.py \
-  --sheet-url "https://docs.google.com/spreadsheets/d/1n_A4L6e8KMR57oL-W5U1woTHMAe7lvfrz9nRKAwOteY/edit" \
-  --config models.yaml \
-  --mode batch
-
-# Live mode: continuously poll for new prompts
-python sheets_inference.py \
-  --sheet-url "https://docs.google.com/spreadsheets/d/1n_A4L6e8KMR57oL-W5U1woTHMAe7lvfrz9nRKAwOteY/edit" \
-  --config models_no_llama.yaml \
-  --mode live \
-  --poll-interval 30
-
-# Stream mode: lowest latency, for live class sessions (see "Running a live session")
+python sheets_inference.py --sheet-url URL --config models.yaml --dry-run   # preview
+python sheets_inference.py --sheet-url URL --config models.yaml             # batch (one pass)
 python sheets_inference.py --sheet-url URL --config models.yaml --mode stream --poll-interval 2
 ```
 
-## Usage
+## The model lineup
 
-### Command Line Options
+`models.yaml` is the red-teaming lineup. It's ordered by how well we **expect** each
+model to resist clinical red-teaming, most robust first; the exercise tests that guess.
+Prices are per 1M tokens (input / output) and were checked against OpenRouter in
+October 2026.
 
-```
-Required:
-  --sheet-url URL       Google Sheets URL (must be shared with service account)
-  --config FILE         Path to YAML configuration file
+| Tab name | Model | Route | Price | Expected |
+|----------|-------|-------|-------|----------|
+| `claude-haiku-5.5` | Claude Haiku 5.5 | Anthropic API | $0.10 / $0.50 | robust |
+| `gpt-6-luna` | GPT-6 Luna | OpenRouter | $0.10 / $0.50 | robust |
+| `deepseek-v4.1-flash` | DeepSeek V4.1 Flash | OpenRouter | $0.30 / $1.20 | middle |
+| `kimi-k2.6` | Kimi K2.6 | OpenRouter | $0.65 / $3.41 | middle |
+| `gpt-4o-mini` | GPT-4o mini (2024) | OpenRouter | $0.15 / $0.60 | more fragile |
+| `gpt-3.5-turbo` | GPT-3.5 Turbo (2023) | OpenRouter | $0.50 / $1.50 | more fragile |
+| `llama-3.1-8b` | Llama 3.1 8B Instruct | OpenRouter | $0.05 / $0.08 | fragile |
+| `dolphin-uncensored` | Dolphin Mistral 24B Venice | OpenRouter | $0.20 / $0.90 | will answer anything |
 
-Mode:
-  --mode {batch,live,stream}
-                        batch: run once; live: continuous polling;
-                        stream: low-latency live mode for class (default: batch)
-  --poll-interval N     Seconds between polls in live/stream mode (default: 10)
+- OpenAI models go through OpenRouter because the OpenAI account has no credits. To go
+  native, delete their `base_url` and `api_key` lines.
+- **GPT-3.5 Turbo is shut down by OpenAI on 23 October 2026.** Remove or replace that
+  entry after that date.
+- `dolphin-uncensored` is a deliberately uncensored fine-tune. Expect outright harmful
+  output on the shared screen.
+- Commented-out extras in the file: Claude Sonnet 5.5, Gemini 3.5 Flash Lite, and an
+  unaligned local Qwen base model.
+- Models run one after another in batch and live modes, so every model you add slows them
+  down. Stream mode runs them in parallel.
+- Renaming a model's `name:` creates a new tab, and that model reprocesses everything.
 
-Filtering:
-  --models LIST         Comma-separated model names to process (default: all)
-  --prompt-range RANGE  Row range like "1-50" or "10-" (default: all)
+`models_no_llama.yaml` is a separate local-GPU lineup: HuggingFace Qwen 2.5 instruct,
+the Qwen base model and Dolphin 2.9, with `device: cuda`.
 
-Behavior:
-  --dry-run             Preview actions without making changes
-  --force               Reprocess cells even if already filled
-
-Logging:
-  --log-file PATH       Also write logs to file
-  --verbose, -v         Enable debug logging
-```
-
-### Examples
-
-```bash
-# Process only specific models
-python sheets_inference.py --sheet-url URL --config models.yaml \
-  --models gpt-4o,claude-3-5-sonnet
-
-# Process rows 1-50 only
-python sheets_inference.py --sheet-url URL --config models.yaml \
-  --prompt-range 1-50
-
-# Dry run to preview what would be processed
-python sheets_inference.py --sheet-url URL --config models.yaml --dry-run
-
-# Live mode with 60-second polling and logging
-python sheets_inference.py --sheet-url URL --config models.yaml \
-  --mode live --poll-interval 60 --log-file inference.log
-
-# Force reprocess all cells (even filled ones)
-python sheets_inference.py --sheet-url URL --config models.yaml --force
-```
-
-## Supported Backends
-
-### OpenAI
-
-**Reference**: [OpenAI API Documentation](https://platform.openai.com/docs/api-reference/chat)
-
-| Model | Context | Notes |
-|-------|---------|-------|
-| `gpt-4o` | 128k | Latest flagship |
-| `gpt-4o-mini` | 128k | Faster, cheaper |
-| `gpt-4-turbo` | 128k | Previous gen |
-| `gpt-3.5-turbo` | 16k | Fast, economical |
-
-### Anthropic Claude
-
-**Reference**: [Anthropic API Documentation](https://docs.anthropic.com/en/api/messages)
-
-| Model | Context | Notes |
-|-------|---------|-------|
-| `claude-sonnet-4-20250514` | 200k | Claude 4 Sonnet |
-| `claude-3-5-sonnet-20241022` | 200k | Balanced |
-| `claude-3-5-haiku-20241022` | 200k | Fastest |
-| `claude-3-opus-20240229` | 200k | Most capable |
-
-### OpenAI-compatible endpoints (DeepSeek, Kimi, OpenRouter)
-
-Any OpenAI-compatible API works through the `openai` backend: set `base_url` and a per-model `api_key`.
+### Config reference
 
 ```yaml
-- name: kimi-k2.6
-  backend: openai
-  base_url: https://openrouter.ai/api/v1
-  api_key: ${OPENROUTER_API_KEY}
-  model_id: moonshotai/kimi-k2.6
-  max_tokens: 1500
+google_sheets:
+  credentials_file: ${HOME}/.config/gspread/service_account.json
+
+models:
+  - name: kimi-k2.6                 # tab name
+    backend: openai                 # openai | anthropic | ollama | huggingface
+    model_id: moonshotai/kimi-k2.6  # the provider's model ID
+    base_url: https://openrouter.ai/api/v1   # openai: any compatible endpoint; ollama: server URL
+    api_key: ${OPENROUTER_API_KEY}  # per-model key; overrides api_keys.openai
+    temperature: 0.7                # 0-2, or null to not send it (default 0.7)
+    max_tokens: 1500                # default 300
+    system_prompt: "..."            # optional
+    extra_body:                     # openai backend: extra request fields
+      reasoning: {enabled: false}
+    # device: cuda                  # huggingface: cuda | mps | cpu
+
+api_keys:
+  openai: ${OPENAI_API_KEY}
+  anthropic: ${ANTHROPIC_API_KEY}
 ```
 
-| Provider | base_url | Example model_id |
-|----------|----------|------------------|
-| OpenRouter | `https://openrouter.ai/api/v1` | `deepseek/deepseek-v4.1-flash`, `moonshotai/kimi-k2.6` |
-| DeepSeek | `https://api.deepseek.com` | `deepseek-chat` |
-| Moonshot | `https://api.moonshot.ai/v1` | see platform.moonshot.ai |
+`${VAR}` is expanded from the environment or `.env`. A key that is still `${...}` after
+expansion is rejected at startup, so a missing variable fails early.
 
-Reasoning models spend tokens thinking before they answer, so give them a generous `max_tokens`.
+## Backends
 
-### Ollama (Local)
+### Anthropic
 
-**Reference**: [Ollama Model Library](https://ollama.com/library)
+The native Messages API, using `ANTHROPIC_API_KEY`. Current Claude models reject the
+`temperature` parameter, so set `temperature: null`. Model IDs:
+[platform.claude.com models overview](https://platform.claude.com/docs/en/about-claude/models/overview).
 
-Requires Ollama running: `ollama serve`
+### OpenAI and OpenAI-compatible endpoints
 
-| Model | Size | Notes |
-|-------|------|-------|
-| `llama3.2:latest` | 8B | Meta's latest |
-| `mistral:latest` | 7B | Fast, capable |
-| `phi3:latest` | 3.8B | Microsoft |
-| `gemma2:latest` | 9B | Google |
+Without `base_url`, this is the native OpenAI API, using `OPENAI_API_KEY`. With
+`base_url` and `api_key`, it talks to any OpenAI-compatible endpoint:
 
-Models are automatically pulled if not present.
+| Provider | `base_url` | Model IDs |
+|----------|------------|-----------|
+| OpenRouter | `https://openrouter.ai/api/v1` | [openrouter.ai/models](https://openrouter.ai/models), e.g. `deepseek/deepseek-v4.1-flash` |
+| DeepSeek | `https://api.deepseek.com` | [DeepSeek docs](https://api-docs.deepseek.com/) |
+| Moonshot | `https://api.moonshot.ai/v1` | [platform.moonshot.ai](https://platform.moonshot.ai/) |
 
-### HuggingFace Transformers
+OpenRouter is the easiest route: one key covers OpenAI, DeepSeek, Kimi, Llama, Mistral,
+Gemini and more. Use `extra_body` for provider options. For example,
+`reasoning: {enabled: false}` keeps DeepSeek and Kimi in fast chat mode. If you leave
+reasoning on, give the model a generous `max_tokens`, since it spends tokens thinking
+before it answers.
 
-**Reference**: [HuggingFace Models](https://huggingface.co/models)
+### Ollama (local)
 
-| Model | Size | Device |
-|-------|------|--------|
-| `microsoft/Phi-3-mini-4k-instruct` | 3.8B | CUDA/MPS/CPU |
-| `google/gemma-2-2b-it` | 2B | CUDA/MPS/CPU |
-| `Qwen/Qwen2.5-0.5B-Instruct` | 0.5B | CPU OK |
+Run `ollama serve`. Models are pulled automatically if missing. Set `base_url` if the
+server isn't on `http://localhost:11434`. Model names: [ollama.com/library](https://ollama.com/library).
 
-## Sheet Structure
+### HuggingFace Transformers (local)
 
-### Prompts Worksheet
+Runs on `device: cuda`, `mps` (Apple Silicon) or `cpu`, and batches prompts. A model is
+only loaded if it has cells to fill. Gated models need `HF_TOKEN`. Models:
+[huggingface.co/models](https://huggingface.co/models).
 
-The source of all prompts. Must be named "Prompts".
+## Command line
 
-| Column | Description |
-|--------|-------------|
-| A: ID | Unique identifier for the prompt |
-| B: Category | Classification/grouping (optional) |
-| C: Prompt | The actual prompt text |
-| D: Notes | Any notes or metadata (optional) |
+```
+python sheets_inference.py --sheet-url URL --config FILE [options]
 
-### Model Worksheets
-
-One worksheet per model, named after the model (e.g., "gpt-4o").
-
-| Column | Description |
-|--------|-------------|
-| A: ID | Copied from Prompts worksheet |
-| B: Prompt | Copied from Prompts worksheet |
-| C: Response | LLM-generated response |
-| D: Status | EMPTY → PROCESSING → DONE/ERROR |
-| E: Timestamp | ISO 8601 completion time |
-| F: Tokens | Response token count (if available) |
-| G: Error | Error message (if Status=ERROR) |
-
-## Educational Use Case
-
-This system is designed for bioethics education, allowing instructors to:
-
-1. **Prepare demonstrations**: Pre-fill responses from multiple models
-2. **Enable student exploration**: Share read-write copies for student experimentation
-3. **Compare model behavior**: Side-by-side analysis across models
-4. **Document failures**: Systematic collection of AI safety violations
-
-### Instructor Workflow
-
-```bash
-# 1. Create sheet with prompts designed to expose ethical violations
-# 2. Run batch processing to fill all model responses
-python sheets_inference.py --sheet-url URL --config models.yaml --mode batch
-
-# 3. Share two versions with students:
-#    - Read-only: For analysis (File > Share > Viewer)
-#    - Read-write: For experimentation (File > Make a copy)
-
-# 4. For live sessions, run in stream mode (see below)
+  --mode {batch,live,stream}  batch: one pass (default); live: re-run everything every poll;
+                              stream: low-latency live mode for class
+  --poll-interval N           seconds between polls in live/stream mode (default 10)
+  --models a,b                only these models (their name: fields)
+  --prompt-range 10-50        only these sheet rows ("10-" = row 10 onward)
+  --dry-run                   show what would run; no API calls or writes
+  --force                     redo cells that already have a response
+  --log-file PATH             also log to a file
+  -v, --verbose               debug logging
 ```
 
-### Running a live session
+Batch mode exits with status 1 if any cell errored.
+
+## Sheet structure
+
+**`Prompts`**: A `ID`, B `Category`, C `Prompt`, D `Notes`. Only the prompt is required.
+
+**One tab per model**: A `ID`, B `Prompt` (copied), C `Response`, D `Status`
+(`PROCESSING` → `DONE` or `ERROR`), E `Timestamp`, F `Tokens`, G `Error`.
+
+Row N of `Prompts` is answered in row N of every model tab. Don't insert or delete rows
+in the middle of `Prompts` once answers exist; add new prompts at the bottom.
+
+**`Judge`**: written by `judge.py` (see below).
+
+## Running a live session
 
 Use stream mode. It sends each new prompt to all models in parallel and polls only the
 `Prompts` tab, so answers start arriving within seconds. Live mode runs models one after
@@ -277,16 +217,17 @@ caffeinate -i python sheets_inference.py \
 ```
 
 - `--poll-interval 2` is about 30 Sheets reads/min plus batched writes, under the
-  60 req/min quota. `1` hits the quota and causes retries; `3` leaves more margin. Without the flag it waits 10 s.
+  60 req/min quota. `1` hits the quota and causes retries; `3` leaves more margin.
 - Start it a few minutes before class. Its first pass fills anything already pending and
   confirms that the service account and every API key work.
 - `caffeinate -i` (macOS) keeps the laptop from sleeping mid-session.
 - `--models a,b,c` limits cost if you don't need the whole lineup.
 - Editing an already-submitted prompt does not re-run it; students should add a new row.
   Afterwards, re-run edited rows with `--mode batch --force --prompt-range N-M`.
-- Students can view answers and submit prompts through the web viewer in `viewer/`.
+- Students can view answers and submit prompts through the web viewer. See
+  `viewer/README.md` for deployment and for putting it on a custom domain over HTTPS.
 
-### Grading the results with an LLM judge
+## Grading the results with an LLM judge
 
 After the session, `judge.py` grades every answered cell against the four categories from
 the lecture (safety, privacy, hallucination, bias). The rubric is in `judge_rubric.md`. Each
@@ -311,86 +252,67 @@ JUDGE_MODEL=claude-opus-5-5 python judge.py --sheet-url URL --config models.yaml
 - In Claude Code, the `/judge` skill (`.claude/skills/judge/`) runs this and summarizes
   which attacks broke which models.
 
-### Student Workflow
+## Errors and rate limits
 
-Students can:
-1. Download the read-only sheet as CSV for analysis
-2. Add new prompts to their copy
-3. Instructor runs stream mode to auto-fill responses
+| Situation | What happens |
+|-----------|--------------|
+| Sheets rate limit or server error (429/503) | Retries 3 times with exponential backoff |
+| Sheets auth error (401/403) | Stops with a message to check the sharing settings |
+| Model API rate limit | Retries 3 times, honoring `retry-after` when the provider sends it |
+| Bad API key or unknown model ID | Batch/live: logged, that model is skipped, the others continue. Stream: the cell gets `ERROR` |
+| Any other model error | That cell gets `Status = ERROR` and the message in column G |
 
-## Error Handling
-
-| Error Type | Behavior |
-|------------|----------|
-| Rate limits (429) | Exponential backoff, retry 3x |
-| Auth errors (401/403) | Log clear message, exit |
-| Model not found | Log error, continue to next model |
-| Network errors | Retry with backoff |
-| Sheet concurrent edit | Retry cell update |
-
-## Rate Limits
-
-| Service | Limit | Notes |
-|---------|-------|-------|
-| Google Sheets | 60 req/min/user | Built-in rate limiting |
-| OpenAI Tier 1 | 500 req/min | Varies by tier |
-| Anthropic Tier 1 | 50 req/min | Varies by tier |
-| Ollama | No limit | Local inference |
-| HuggingFace | No limit | Local inference |
+Google Sheets allows 60 requests per minute per user, and the client spaces its requests
+to stay under that. Model API limits depend on your provider account.
 
 ## Troubleshooting
 
-### "Spreadsheet not found" or "Permission denied"
+**"Spreadsheet not found" / "Permission denied"**: the sheet isn't shared with the service
+account's email as Editor, or the URL is wrong.
 
-1. Verify the sheet URL is correct
-2. Check that the sheet is shared with the service account email
-3. Ensure the service account has "Editor" access
+**"api_key for model ... references an unset environment variable"**: that variable
+(usually `OPENROUTER_API_KEY`) isn't set in your shell or in `.env`.
 
-### "API key not configured"
+**"temperature" rejected by a Claude model**: set `temperature: null` for that model.
 
-1. Set environment variables: `export OPENAI_API_KEY=...`
-2. Or create a `.env` file in the same directory
-3. Verify the key is valid at the provider's dashboard
+**A model shows `ERROR` on every row**: check column G. A wrong `model_id` or a model the
+provider has retired shows up here. Check the ID against the provider's model list.
 
-### "Cannot connect to Ollama"
+**Empty or cut-off responses from DeepSeek or Kimi**: reasoning used up `max_tokens`.
+Raise it, or set `extra_body: {reasoning: {enabled: false}}`.
 
-1. Start Ollama: `ollama serve`
-2. Verify it's running: `curl http://localhost:11434/api/tags`
-3. Check firewall settings if using remote Ollama
+**"Cannot connect to Ollama"**: start `ollama serve` and check
+`curl http://localhost:11434/api/tags`.
 
-### HuggingFace model loading fails
+**HuggingFace model fails to load**: not enough RAM/VRAM, or a gated model without
+`HF_TOKEN`. Try a smaller model.
 
-1. Ensure sufficient RAM/VRAM for the model
-2. For gated models, set `HF_TOKEN` environment variable
-3. Try a smaller model (e.g., Qwen2.5-0.5B)
-
-## Architecture
+## Layout
 
 ```
-sheets_inference/
-├── sheets_inference.py  # Main entry point, CLI handling
-├── config.py            # YAML loading, validation, env expansion
-├── sheets_io.py         # Google Sheets I/O, rate limiting
-├── backends.py          # LLM backend abstraction
-├── processor.py         # Orchestration logic
-├── stream.py            # Low-latency live mode
-├── judge.py             # LLM-as-judge grading of the results
-├── judge_rubric.md      # Judge rubric (safety, privacy, hallucination, bias)
-├── models.yaml          # Configuration file
-├── viewer/              # Apps Script web app for the sheet
-├── .claude/skills/judge # Claude Code /judge skill
-├── requirements.txt     # Python dependencies
-└── README.md            # This file
+sheets_inference.py   CLI entry point
+config.py             YAML loading, validation, ${VAR} expansion
+sheets_io.py          Google Sheets I/O, rate limiting, column layout
+processor.py          batch/live orchestration
+stream.py             stream mode
+backends.py           openai / anthropic / ollama / huggingface backends
+judge.py              LLM-as-judge grading
+judge_rubric.md       judge rubric
+models.yaml           red-teaming lineup
+models_no_llama.yaml  local-GPU lineup
+viewer/               Apps Script web viewer
+.claude/skills/judge  Claude Code /judge skill
 ```
 
 ## References
 
-- **gspread**: https://docs.gspread.org/en/v6.1.4/
-- **OpenAI API**: https://platform.openai.com/docs/api-reference/chat
-- **Anthropic API**: https://docs.anthropic.com/en/api/messages
-- **Ollama API**: https://github.com/ollama/ollama/blob/main/docs/api.md
-- **HuggingFace**: https://huggingface.co/docs/transformers/
+- gspread: https://docs.gspread.org/en/v6.1.4/
+- Anthropic Messages API: https://platform.claude.com/docs/en/api/messages
+- OpenAI Chat API: https://platform.openai.com/docs/api-reference/chat
+- OpenRouter API: https://openrouter.ai/docs
+- Ollama API: https://github.com/ollama/ollama/blob/main/docs/api.md
+- HuggingFace Transformers: https://huggingface.co/docs/transformers/
 
 ## License
 
-MIT License - Free for educational and commercial use.
+MIT
