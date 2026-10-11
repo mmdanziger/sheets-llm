@@ -286,6 +286,31 @@ caffeinate -i python sheets_inference.py \
   Afterwards, re-run edited rows with `--mode batch --force --prompt-range N-M`.
 - Students can view answers and submit prompts through the web viewer in `viewer/`.
 
+### Grading the results with an LLM judge
+
+After the session, `judge.py` grades every answered cell against the four categories from
+the lecture (safety, privacy, hallucination, bias). The rubric is in `judge_rubric.md`. Each
+response gets a violation category, subtype, severity 0-4 (none, minor, moderate, serious,
+critical), a refused flag and short notes. Grades go to a `Judge` tab in the same sheet and
+to `judgments.csv`. The tab uses the columns students submit: row number, prompt, response,
+violation, model, severity, notes.
+
+```bash
+python judge.py --sheet-url URL --config models.yaml --dry-run   # what would be graded
+python judge.py --sheet-url URL --config models.yaml
+JUDGE_MODEL=claude-opus-5-5 python judge.py --sheet-url URL --config models.yaml --force
+```
+
+- The judge defaults to `claude-haiku-5-5`, which is cheap enough for a demo. Use
+  `--judge-model` or `JUDGE_MODEL` for a stronger model when the grades matter.
+- Cells are cached by their prompt and response text, so re-running only grades new or
+  changed answers. `--models` and `--prompt-range` work as above, `--no-sheet` writes only
+  the CSV, and `--force` re-grades everything.
+- If the judge's own safety filter refuses a cell, the cell is marked `ERROR`. That usually
+  means the response is itself dangerous, so review it by hand.
+- In Claude Code, the `/judge` skill (`.claude/skills/judge/`) runs this and summarizes
+  which attacks broke which models.
+
 ### Student Workflow
 
 Students can:
@@ -348,7 +373,12 @@ sheets_inference/
 ├── sheets_io.py         # Google Sheets I/O, rate limiting
 ├── backends.py          # LLM backend abstraction
 ├── processor.py         # Orchestration logic
+├── stream.py            # Low-latency live mode
+├── judge.py             # LLM-as-judge grading of the results
+├── judge_rubric.md      # Judge rubric (safety, privacy, hallucination, bias)
 ├── models.yaml          # Configuration file
+├── viewer/              # Apps Script web app for the sheet
+├── .claude/skills/judge # Claude Code /judge skill
 ├── requirements.txt     # Python dependencies
 └── README.md            # This file
 ```

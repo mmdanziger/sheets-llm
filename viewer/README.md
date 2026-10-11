@@ -36,20 +36,53 @@ Run sheets-llm in stream mode alongside it (see "Running a live session" in the 
 python sheets_inference.py --sheet-url URL --config models.yaml --mode stream --poll-interval 2
 ```
 
-## Custom domain (e.g. Namecheap)
+## Custom domain
 
-Apps Script web apps can't be served on a custom domain, so A and CNAME records won't work
-(Google won't answer for your hostname). Use a redirect instead. In Namecheap,
-**Advanced DNS → Add New Record → URL Redirect Record**:
+Apps Script web apps can't be served on a custom domain, so a CNAME straight to Google
+won't work: Google won't answer for your hostname. You need a small redirect page that
+does answer for it, and it must answer over **HTTPS**.
 
-| Host | Value | Type |
-|------|-------|------|
-| `@` or a subdomain such as `app` | the `…/exec` URL | Permanent (301) |
+Namecheap's **URL Redirect Record** only answers on plain HTTP. Firefox falls back to HTTP
+and works. Chrome tries `https://` first, the connection hangs on port 443, and you get
+`ERR_CONNECTION_TIMED_OUT`, on phones in particular. Don't use it.
 
-- Don't use **Masked**: it wraps the page in an iframe, which Apps Script blocks by default.
-- Remove any existing A/CNAME/parking record for the same host first.
-- Redeploy by editing the existing deployment (new version), not with a new deployment,
-  so the `/exec` URL and the redirect stay valid.
+A GitHub Pages redirect works instead, and it is free with automatic HTTPS:
+
+1. Create a public repo with an `index.html` that redirects to the `/exec` URL. Copy it to
+   `404.html` so any path redirects too, and add a `CNAME` file containing the hostname:
+
+   ```html
+   <!doctype html>
+   <meta charset="utf-8">
+   <meta http-equiv="refresh" content="0; url=https://script.google.com/macros/s/…/exec">
+   <script>location.replace("https://script.google.com/macros/s/…/exec");</script>
+   <a href="https://script.google.com/macros/s/…/exec">Continue</a>
+   ```
+
+2. Turn on Pages for the repo and set the custom domain:
+
+   ```bash
+   gh api -X POST repos/OWNER/REPO/pages -f 'source[branch]=main' -f 'source[path]=/'
+   gh api -X PUT  repos/OWNER/REPO/pages -f cname=app.example.com
+   ```
+
+3. In Namecheap, delete any URL Redirect, A or parking record for the host, then add
+   **Advanced DNS → CNAME Record**: host `app`, value `OWNER.github.io.`.
+4. Wait for the certificate (minutes to a few hours), then enforce HTTPS:
+
+   ```bash
+   gh api repos/OWNER/REPO/pages -q .https_certificate.state   # wait for "approved"
+   gh api -X PUT repos/OWNER/REPO/pages -F https_enforced=true
+   ```
+
+   If the domain was set in Pages before DNS pointed at GitHub, the certificate can stall
+   at `authorization_created`. Remove and re-add the custom domain once DNS resolves.
+5. If Chrome cached the old HTTPS failure, clear it at `chrome://net-internals/#hsts` →
+   "Delete domain security policies".
+
+The class instance is `redteam.mmdanziger.com` → repo `mmdanziger/redteam-redirect`.
+Redeploy the script by editing the existing deployment (new version), not by creating a new
+deployment, so the `/exec` URL and the redirect page stay valid.
 
 ## Afterwards
 

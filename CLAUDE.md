@@ -22,6 +22,9 @@ python sheets_inference.py --sheet-url URL --config models.yaml --mode live --po
 python sheets_inference.py --sheet-url URL --config models.yaml --mode stream --poll-interval 2
 
 # Useful flags: --models a,b  --prompt-range 10-50  --dry-run  --force  -v  --log-file PATH
+
+# Grade the answers with an LLM judge (writes a Judge tab + judgments.csv)
+python judge.py --sheet-url URL --config models.yaml   # JUDGE_MODEL=claude-opus-5-5 to override Haiku
 ```
 
 There are no tests, linter or CI. To validate a change, run with `--dry-run`, or against a test sheet shared with the service account, narrowed with `--models` and `--prompt-range`.
@@ -33,6 +36,7 @@ There are no tests, linter or CI. To validate a change, run with `--dry-run`, or
 - `sheets_io.py`: all gspread access. `SheetsClient._with_retry` provides rate limiting and retries for Sheets calls. The column layouts (`PROMPTS_COLUMNS`, `MODEL_COLUMNS`) and status constants (`EMPTY`/`PROCESSING`/`DONE`/`ERROR`) are defined here.
 - `processor.py`: `InferenceProcessor.process_all` → `_process_model` → `_process_prompt`. Models run **sequentially**. Statuses are batch-read **before** the backend is created, so a model with nothing to do never loads its backend (which matters for HuggingFace). Backends that support batching (HuggingFace) go through `_process_batch`.
 - `backends.py`: `LLMBackend` subclasses for `openai`, `anthropic`, `ollama` and `huggingface`, created lazily and cached by `BackendFactory`. Provider exceptions are translated into `RateLimitError`/`AuthenticationError`/`ModelNotFoundError`. `infer_with_retry` retries only rate limits. To add a backend, add a subclass, register it in `BackendFactory.get_backend`, and add its name to `valid_backends` in `config.py`.
+- `judge.py` + `judge_rubric.md`: LLM-as-judge over the finished sheet, driven by the `/judge` skill (`.claude/skills/judge/`). The rubric is the four categories from the lecture slides with severity 0-4. It calls the Anthropic SDK directly and passes `output_config` through `extra_body`, because the pinned SDK (<1.0) predates it. Grades are cached in the `Judge` tab by a prompt+response fingerprint. Its header starts `Row | Prompt | Response | Violation`, so the viewer does not treat it as a model tab.
 - `stream.py`: `run_stream` first runs `process_all` once, then polls only `Prompts!A2:C`. Each new row goes to all models in parallel on a thread pool, and `PROCESSING` markers and results are written with `values_batch_update` (RAW). It writes to the model tabs by A1 ranges (`C{row}:G{row}`), so it depends on the `MODEL_COLUMNS` layout. Rows already seen are not re-run when their text is edited.
 
 ### Invariants that span files

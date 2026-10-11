@@ -209,3 +209,6 @@ __marimo__/
 sheets_env/
 .github/copilot-instructions.md
 .DS_Store
+
+# LLM judge output (contains model responses)
+judgments.csv
